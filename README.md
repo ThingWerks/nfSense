@@ -5,6 +5,7 @@
   - its still an early development
   - it is designed for public access wifi, schools, or environments with heavy captive portal, speed control and bandwitch requirement.
   - it can heavily restrict internet speed but still produce a nice user experience do to bust speed modes
+  - great for Starlink and aggrigated modem/router setups, WISPs 
 
 #### Features:
   - based on nfTables, ISC DHCP and Bind0
@@ -16,7 +17,9 @@
   - web base traffic and connections monitoring
   - network performance monitoring 
   - quorum based gateway monitoring
-  - quick setup, no complex installation
+  - efortless setup, no complex installation steps
+  - connection stats, like active DHCP and portal users, open sockets per gateway and detailed gateway performance monitoring
+  - intellegent gateway switchover and aggrigation, smart loadbalancing
 
 #### Unique Capabilities:
   - have multiple redundant gateways all on one or more interfaces
@@ -31,3 +34,4 @@
  - Telegram notification
  - nGinx integration
  - local DNS zones
+ - clustering and hot failover
