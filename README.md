@@ -26,6 +26,7 @@
   - router on a stick
   - have mutilple speed profiles based on MAC address
   - VPN concentration and hairpinning
+  - use a single onsite device as bosth a server and router without the performance hit of running pfsense in a VM
 
 #### In Development:
  - user based network
