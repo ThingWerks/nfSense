@@ -8,7 +8,7 @@
   - great for Starlink and aggrigated modem/router setups, WISPs 
 
 #### Features:
-  - based on nfTables, ISC DHCP and Bind0
+  - based on nfTables, ISC DHCP and Bind9
   - built for Debian 12 and NodeJS 22
   - MAC based speed limiting, speed bursting
   - MAC based netwrok access control
