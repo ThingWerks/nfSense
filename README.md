@@ -29,7 +29,7 @@
   - use a single onsite device as bosth a server and router without the performance hit of running pfsense in a VM
 
 #### In Development:
- - user based network
+ - user based network login
  - web interface for firewall rules
  - web interface for VPN management
  - Telegram notification
