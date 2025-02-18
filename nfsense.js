@@ -1,6 +1,53 @@
 
 debug = true;
 script = {
+    setup: function () {
+        console.log("updating package list...");
+
+        try { cp.execSync("apt-get update"); } catch (e) { }
+
+        console.log("installing system network packages...");
+        cp.execSync("apt-get install -y conntrack nftables isc-dhcp-server bind9 dnsmasq psmisc bmon bpytop tcptrack openvpn wireguard traceroute");
+
+        console.log("installing NPM packages...");
+        cp.execSync("cd " + path.app + " ; npm i express");
+        cp.execSync("cd " + path.app + " ; npm i ws");
+        cp.execSync("cd " + path.app + " ; npm i systeminformation");
+
+        console.log("checking if packet forwarding is enabled");
+        if (fs.readFileSync("/proc/sys/net/ipv4/ip_forward", 'utf8').includes("0")) {
+            console.log("forwarding not enabled!! Enabling now");
+            cp.execSync(" sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf");
+            cp.execSync("echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward");
+            cp.execSync("sudo sysctl -p");
+        } else console.log("kernel forwarding is enabled");
+
+        console.log("checking nfTables server...");
+        if (!fs.existsSync('/etc/systemd/system/sysinit.target.wants/nftables.service')) {
+            cp.execSync("systemctl enable nftables.service");
+            console.log("enabling now");
+            //needed if have bridge
+            //  cp.execSync("sudo sed 's`Wants=network-pre.target`#Wants=network-pre.target`' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
+            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
+            //  cp.execSync("sudo sed 's`Before=network-pre.target shutdown.target`After=network.target' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
+            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
+        }
+        else console.log("already enabled");
+
+        console.log("disabling SystemD Bind9");
+        cp.execSync("systemctl stop named.service");
+        cp.execSync("systemctl disable named.service");
+        console.log("disabling SystemD DNSmasq");
+        cp.execSync("systemctl stop dnsmasq.service");
+        cp.execSync("systemctl disable dnsmasq.service");
+        console.log("disabling SystemD ISC-DHCP-Server");
+        cp.execSync("systemctl stop isc-dhcp-server.service");
+        cp.execSync("systemctl disable isc-dhcp-server.service");
+        cp.execSync("mkdir " + path.app + "/tmp");
+
+        console.log("\n\nrouter setup done!!\n");
+        process.exit();
+    },
     gatewayMonitor: function () {
         for (let x = 0; x < cfg.gateways.length; x++) {
             let gateway = state.gateways[x], config = cfg.gateways[x], lostLan = 0, lostLanPercent = 0, averageLan = 0, averageLanCalc = 0,
@@ -338,7 +385,7 @@ script = {
             stat_nv.bw[x][1][time.min10] = stat.bw[x][1];
         }
         for (let x = 0; x < cfg.gateways.length; x++) {
-            if (stat_nv.avg5Min.gateways[x])
+            if (stat_nv.avg5Min.gateways[x]!=undefined)
                 stat_nv.gateways.pingDropsWan[x]
                     = Math.floor(stat_nv.avg5Min.gateways[x].reduce((a, b) => a + b, 0));
         }
@@ -427,39 +474,9 @@ script = {
         nft: function (ip, speed, action) {
             cp.exec(" nft " + action + " element ip nat allow { " + ip + " }"
                 + " ; nft " + action + " element ip mangle allow { " + ip + " }"
-                + ";  nft " + action + " element ip filter " + cfg.nft.speed[speed].name + " { " + ip + " }"
+                + ";  nft " + action + " element ip filter " + cfg.network.speed.macs[speed].name + " { " + ip + " }"
                 , (e) => { if (e) console.error(e); });
         },
-    },
-    vpn: {
-        wireguard: {
-            clientConnect: function () {
-                for (let x = 0; x < cfg.vpn.wireguard.client.length; x++) {
-                    console.log("WireGuard - connecting to site: " + cfg.vpn.wireguard.client[x].name);
-                    service(cfg.vpn.wireguard.client[x], x);
-                }
-                function service(connection, x) {
-                    let fileName = path.app + "/tmp/wg" + x + ".conf";
-                    let buf = [
-                        "[Interface]",
-                        "PrivateKey = " + connection.keyPrivate,
-                        "Address = " + connection.address,
-                        "[Peer]",
-                        "PublicKey = " + connection.keyServer,
-                        "Endpoint = " + connection.endpoint,
-                        "AllowedIPs = " + connection.networks,
-                        "PersistentKeepalive = " + connection.keepalive,
-                    ]
-                    fs.writeFileSync(fileName, buf.join("\n"));
-                    cp.exec("wg-quick down wg" + x + "; wg-quick up " + fileName, (e, d) => {
-                        if (e) console.log("Wireguard - " + connection.name + " - error: ", e);
-                        else console.log("Wireguard - " + connection.name + " - successfully connected: ", d);
-
-                        cp.exec("wg show", (e, d) => { console.log(e || "", d) })
-                    });
-                }
-            }
-        }
     },
 }
 app = {
@@ -469,37 +486,36 @@ app = {
 
             if (flush !== false) {
                 console.log("nftables  - flushing all speed limiter tables");
-                cfg.nft.speed.forEach(element => { nft.flush("filter", element.name); });
+                cfg.network.speed.mac.forEach(element => { nft.flush("filter", element.name); });
             }
 
             nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept");
 
-            if (cfg.nft.speed[1] != undefined) {
+            if (cfg.network.speed.mac[1] != undefined) {
                 console.log("nftables  - speed - setting global limit");
                 nft.delete("filter forward", "speed_unrestricted");
                 cp.execSync('nft add chain ip filter speed_limiter');
                 nft.add("filter forward", "speed_jump", "jump speed_limiter");
                 cp.execSync('nft flush chain ip filter speed_limiter');
                 cp.execSync('nft add rule ip filter speed_limiter ct state new ip daddr 0.0.0.0/0 accept');
-
-                nft.speed();
+                nft.speedMAC();
             } else {
                 console.log("nftables  - speed - setting no limiters");
                 nft.delete("filter forward", "speed_jump");
                 nft.add("filter forward", "speed_unrestricted", "ct state related,established ip daddr 0.0.0.0/0 accept");
             }
 
-            if (cfg.network.services.portal.enabled) {
+            if (cfg.network.portal.enabled) {
                 if (flush !== false) {
                     nft.flush("nat", "allow");
                     nft.flush("mangle", "allow");
                 }
                 nft.update("nat prerouting", "nat_portal_redirect_dns", 'ip saddr != @allow udp dport 53 dnat to '
                     + cfg.network.interface[0].ip + ':52');
-                nft.update("nat prerouting", "nat_portal_redirect_web", 'ip saddr != @allow tcp dport 80 dnat to '
+                nft.update("nat prerouting", "nat_portal_redirect_http", 'ip saddr != @allow tcp dport 88 dnat to '
                     + cfg.network.interface[0].ip + ':80');
-                nft.update("nat prerouting", "nat_portal_redirect_web", 'ip saddr != @allow tcp dport 443 dnat to '
-                    + cfg.network.interface[0].ip + ':80');
+                nft.update("nat prerouting", "nat_portal_redirect_https", 'ip saddr != @allow tcp dport 443 dnat to '
+                    + cfg.network.interface[0].ip + ':443');
                 nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "'
                     + ((cfg.network.interface[1]) ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
             } else {
@@ -793,7 +809,7 @@ app = {
                     , '"nfsense_' + name + '" # handle ', '\n');
                 return Number(handleNum);
             },
-            speed: function () {
+            speedMAC: function () {
                 let buf = [
                     {
                         add:
@@ -912,10 +928,245 @@ app = {
                         }
                     }
                 ];
-                for (let x = 0; x < cfg.nft.speed.length; x++) {
-                    rule = cfg.nft.speed[x];
+                for (let x = 0; x < cfg.network.speed.mac.length; x++) {
+                    rule = cfg.network.speed.mac[x];
                     if (x != 0) {
-                        console.log("nftables  - creating speed limiter rule - " + rule.name);
+                        console.log("nftables  - creating mac based speed limiter rule - " + rule.name);
+                        buf.push({
+                            add: {
+                                rule: {
+                                    family: "ip",
+                                    table: "filter",
+                                    chain: "speed_limiter",
+                                    comment: "nfsense_speed_in_" + rule.name,
+                                    expr: [
+                                        {
+                                            match: {
+                                                op: "in",
+                                                left: { ct: { key: "state" } },
+                                                right: ["established", "related"]
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "saddr" } },
+                                                right: { prefix: { addr: "0.0.0.0", len: 0 } }
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "daddr" } },
+                                                right: "@" + rule.name
+                                            }
+                                        },
+                                        {
+                                            meter: {
+                                                key: { payload: { protocol: "ip", field: "daddr" } },
+                                                stmt: {
+                                                    limit: {
+                                                        rate: Math.round(rule.down / 8),
+                                                        burst: Math.round(rule.downBurst / 8),
+                                                        per: "second",
+                                                        rate_unit: "kbytes",
+                                                        burst_unit: "kbytes"
+                                                    }
+                                                },
+                                                size: 2048,
+                                                name: rule.name + "_down"
+                                            }
+                                        },
+                                        {
+                                            accept: null
+                                        }
+                                    ]
+                                }
+                            }
+                        })
+                        buf.push({
+                            add: {
+
+                                rule: {
+                                    family: "ip",
+                                    table: "filter",
+                                    chain: "speed_limiter",
+                                    comment: "nfsense_speed_out_" + rule.name,
+                                    expr: [
+                                        {
+                                            match: {
+                                                op: "in",
+                                                left: { ct: { key: "state" } },
+                                                right: ["established", "related"]
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "saddr" } },
+                                                right: "@" + rule.name
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "daddr" } },
+                                                right: {
+                                                    prefix: { addr: "0.0.0.0", len: 0 }
+                                                }
+                                            }
+                                        },
+                                        {
+                                            meter: {
+                                                key: { payload: { protocol: "ip", field: "saddr" } },
+                                                stmt: {
+                                                    limit: {
+                                                        rate: Math.round(rule.up / 8),
+                                                        burst: Math.round(rule.upBurst / 8),
+                                                        per: "second",
+                                                        rate_unit: "kbytes",
+                                                        burst_unit: "kbytes"
+                                                    }
+                                                },
+                                                size: 2048,
+                                                name: rule.name + "_up"
+                                            }
+                                        },
+                                        {
+                                            accept: null
+                                        }
+                                    ]
+                                }
+
+                            }
+                        })
+                    }
+                }
+                cp.execSync("printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -");
+            },
+            speedIP: function () {
+                let buf = [
+                    {
+                        add:
+                        {
+                            rule: {
+                                family: "ip",
+                                table: "filter",
+                                chain: "speed_limiter",
+                                handle: 20,
+                                expr: [
+                                    {
+                                        match: {
+                                            op: "in",
+                                            left: {
+                                                ct: {
+                                                    key: "state"
+                                                }
+                                            },
+                                            right: [
+                                                "established",
+                                                "related"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: {
+                                                payload: {
+                                                    protocol: "ip",
+                                                    field: "saddr"
+                                                }
+                                            },
+                                            right: {
+                                                prefix: {
+                                                    addr: "0.0.0.0",
+                                                    len: 0
+                                                }
+                                            }
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: {
+                                                payload: {
+                                                    protocol: "ip",
+                                                    field: "daddr"
+                                                }
+                                            },
+                                            right: "@unrestricted"
+                                        }
+                                    },
+                                    {
+                                        accept: null
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        add: {
+                            rule: {
+                                family: "ip",
+                                table: "filter",
+                                chain: "speed_limiter",
+                                expr: [
+                                    {
+                                        match: {
+                                            op: "in",
+                                            left: {
+                                                ct: {
+                                                    key: "state"
+                                                }
+                                            },
+                                            right: [
+                                                "established",
+                                                "related"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: {
+                                                payload: {
+                                                    protocol: "ip",
+                                                    field: "saddr"
+                                                }
+                                            },
+                                            right: "@unrestricted"
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: {
+                                                payload: {
+                                                    protocol: "ip",
+                                                    field: "daddr"
+                                                }
+                                            },
+                                            right: {
+                                                prefix: {
+                                                    addr: "0.0.0.0",
+                                                    len: 0
+                                                }
+                                            }
+                                        }
+                                    },
+                                    {
+                                        accept: null
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ];
+                for (let x = 0; x < cfg.network.speed.mac.length; x++) {
+                    rule = cfg.network.speed.mac[x];
+                    if (x != 0) {
+                        console.log("nftables  - creating mac based speed limiter rule - " + rule.name);
                         buf.push({
                             add: {
                                 rule: {
@@ -1030,89 +1281,34 @@ app = {
             },
         }
     },
-    setup: function () {
-        console.log("updating package list...");
-
-        try { cp.execSync("apt-get update"); } catch (e) { }
-
-        console.log("installing system network packages...");
-        cp.execSync("apt-get install -y conntrack nftables isc-dhcp-server bind9 dnsmasq psmisc bmon bpytop tcptrack openvpn wireguard traceroute");
-
-        console.log("installing NPM packages...");
-        cp.execSync("cd " + path.app + " ; npm i express");
-        cp.execSync("cd " + path.app + " ; npm i ws");
-        cp.execSync("cd " + path.app + " ; npm i systeminformation");
-
-        console.log("checking if packet forwarding is enabled");
-        if (fs.readFileSync("/proc/sys/net/ipv4/ip_forward", 'utf8').includes("0")) {
-            console.log("forwarding not enabled!! Enabling now");
-            cp.execSync(" sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf");
-            cp.execSync("echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward");
-            cp.execSync("sudo sysctl -p");
-        } else console.log("kernel forwarding is enabled");
-
-        console.log("checking nfTables server...");
-        if (!fs.existsSync('/etc/systemd/system/sysinit.target.wants/nftables.service')) {
-            cp.execSync("systemctl enable nftables.service");
-            console.log("enabling now");
-            //needed if have bridge
-            //  cp.execSync("sudo sed 's`Wants=network-pre.target`#Wants=network-pre.target`' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
-            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
-            //  cp.execSync("sudo sed 's`Before=network-pre.target shutdown.target`After=network.target' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
-            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
-        }
-        else console.log("already enabled");
-
-        console.log("disabling SystemD Bind9");
-        cp.execSync("systemctl stop named.service");
-        cp.execSync("systemctl disable named.service");
-        console.log("disabling SystemD DNSmasq");
-        cp.execSync("systemctl stop dnsmasq.service");
-        cp.execSync("systemctl disable dnsmasq.service");
-        console.log("disabling SystemD ISC-DHCP-Server");
-        cp.execSync("systemctl stop isc-dhcp-server.service");
-        cp.execSync("systemctl disable isc-dhcp-server.service");
-        cp.execSync("mkdir " + path.app + "/tmp");
-
-        /*
-        if (cfg.network.services.dhcp.enabled) {
-            console.log("looking for DHCPD socket based server...");
-            if (!fs.existsSync('/etc/systemd/system/isc-dhcp-server.service')) {
-                console.log("DHCPD socket service doesn't exist, creating ");
-                let service = [
-                    "[Unit]",
-                    "Description=NFT Helper",
-                    "After=network-online.target",
-                    "Wants=network-online.target\n",
-                    "[Install]",
-                    "WantedBy=multi-user.target\n",
-                    "[Service]",
-                    "ExecStart=socat -u EXEC:'dhcpd -4 -d -cf /etc/dhcp/dhcpd.conf',pty,ctty,stderr UNIX-LISTEN:/tmp/isc-dhcp-server,reuseaddr",
-                    "Type=simple",
-                    "LogLevelMax=0",
-                    "Restart=always",
-                    "RestartSec=10ms",
-                    "User=root",
-                    "Group=root",
-                    "WorkingDirectory=/apps/",
-                    "Restart=always\n",
-                ];
-                cp.execSync("touch /etc/systemd/system/isc-dhcp-server.service");
-                cp.execSync("chown $USER /etc/systemd/system/isc-dhcp-server.service");
-                fs.writeFileSync("/etc/systemd/system/isc-dhcp-server.service", server.join("\n"));
-                cp.execSync("mkdir /apps/ -p");
-                cp.execSync("systemctl daemon-reload");
-                cp.execSync("systemctl enable isc-dhcp-server.service");
-                cp.exec("systemctl start isc-dhcp-server.service");
-                console.log("DhCPD service installed and started!!");
-                console.log("verify with: socat - UNIX-CONNECT:/tmp/isc-dhcp-server");
-                process.exit();
+    vpn: {
+        wireguard: {
+            clientConnect: function () {
+                for (let x = 0; x < cfg.vpn.wireguard.client.length; x++) {
+                    console.log("WireGuard - connecting to site: " + cfg.vpn.wireguard.client[x].name);
+                    service(cfg.vpn.wireguard.client[x], x);
+                }
+                function service(connection, x) {
+                    let fileName = path.app + "/tmp/wg" + x + ".conf";
+                    let buf = [
+                        "[Interface]",
+                        "PrivateKey = " + connection.keyPrivate,
+                        "Address = " + connection.address,
+                        "[Peer]",
+                        "PublicKey = " + connection.keyServer,
+                        "Endpoint = " + connection.endpoint,
+                        "AllowedIPs = " + connection.networks,
+                        "PersistentKeepalive = " + connection.keepalive,
+                    ]
+                    fs.writeFileSync(fileName, buf.join("\n"));
+                    cp.exec("wg-quick down wg" + x + "; wg-quick up " + fileName, (e, d) => {
+                        if (e) console.log("\nWireguard - " + connection.name + " - error: ", e);
+                        else console.log("\nWireguard - " + connection.name + " - successfully connected: ", d);
+                        cp.exec("wg show", (e, d) => { console.log(e || "", d) })
+                    });
+                }
             }
-            else console.log("already setup");
         }
-        */
-        console.log("router prep done!!");
-        process.exit();
     },
     pingAsync: function (address, result, count, mark) {
         spawn("ping", ["-c 1", address, "-W 2", "-m " + mark], undefined, (data, object) => {         // data is the incoming data from the spawn close event (final data). Obj is the original options sent for the future CB
@@ -1225,7 +1421,7 @@ app = {
                         if (user[mac] && user[mac].speed == 0) {
                             console.log("ARP - urestricted user connection - mac: ", mac, " - ip: ", changes.added[mac].ip);
                         }
-                        if (cfg.network.services.portal.enabled == true) {
+                        if (cfg.network.portal.enabled == true) {
                             if (user[mac]) {
                                 findUser(mac, changes.added[mac].ip, buf.add);
                             }
@@ -1244,7 +1440,7 @@ app = {
                 if (Object.keys(changes.removed).length > 0) {
                     buf.delete = {}
                     for (const mac in changes.removed) {
-                        if (cfg.network.services.portal.enabled == true) {
+                        if (cfg.network.portal.enabled == true) {
                             if (user[mac]) findUser(mac, changes.removed[mac].ip, buf.delete);
                         } else findUser(mac, changes.removed[mac].ip, buf.delete);
                     }
@@ -1254,7 +1450,7 @@ app = {
                     buf.add = {};
                     buf.delete = {};
                     for (const mac in changes.updated) {
-                        if (cfg.network.services.portal.enabled == true) {
+                        if (cfg.network.portal.enabled == true) {
                             if (user[mac]) {
 
                                 if (changes.updated[mac].addedIPs.length > 0)
@@ -1276,7 +1472,7 @@ app = {
             function findUser(mac, ip, tbuf) {
                 let speed;
                 if (user == undefined || user[mac] == undefined) speed = "global";
-                else speed = cfg.nft.speed[user[mac].speed].name;
+                else speed = cfg.network.speed.mac[user[mac].speed].name;
                 if (tbuf[speed] == undefined) tbuf[speed] = { ip: [] }
                 tbuf[speed].ip.push(...ip);
             }
@@ -1285,9 +1481,9 @@ app = {
             for (const speed in object) {
                 if (cfg.log.arp) console.log("nftables  - " + type + " IPs: ", object[speed].ip, " for speed class ", speed);
                 cp.exec(" nft " + type + " element ip filter " + speed + " { " + object[speed].ip + " }"
-                    + ((cfg.network.services.portal.enabled) ?
+                    + ((cfg.network.portal.enabled) ?
                         " ; nft " + type + " element ip nat allow { " + object[speed].ip + " }" : "")
-                    + ((cfg.network.services.portal.enabled) ?
+                    + ((cfg.network.portal.enabled) ?
                         " ; nft " + type + " element ip mangle allow { " + object[speed].ip + " }" : "")
                     , (e) => {
                         if (e) {
@@ -1365,12 +1561,161 @@ app = {
             return changes;
         }
         arpTimer = setInterval(() => {
-            if (cfg.network.services.portal.enabled == true || cfg.nft.speed.length > 0) readArpTable();
+            if (cfg.network.portal.enabled == true || cfg.network.speed.mac.length > 0) readArpTable();
             else clearInterval(tate.arpTimer);
         }, cfg.network.arpRefresh);
     },
 }
 server = {
+    web: function () {
+        webAdmin.use('/admin', express.static(path.app + '/public'));
+        web.use('/admin', express.static(path.app + '/public'));
+
+        //  webPublic.use('/', express.static(path.app + '/monitor'));
+        webPublic.use('/monitor', express.static(path.app + '/monitor'));
+        function wsObject() {
+            return {
+                stat,
+                statPlus: {
+                    arpTable: stat_nv.arp[time.min10],
+                    pingDrop: stat_nv.gateways.pingDropsWan,
+                },
+                state: {
+                    gateways: state.gateways,
+                },
+                chart: { bandwidth: { x: Date.now(), y: stat.bw[0][1], y2: stat.bw[0][0] } },
+            };
+        }
+        webPublic.get('/monitor', (req, res) => {
+            res.sendFile(require('path').join(__dirname, "/monitor/monitor.html"));
+        });
+        webPublic.get('/data', (req, res) => {
+            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+        });
+        webAdmin.get('/admin', (req, res) => {
+            res.sendFile(require('path').join(__dirname, '/public/index.html'));
+        });
+        webAdmin.get('/data', (req, res) => {
+            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+        });
+        webAdmin.get('/logout', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - web client logout - ' + clientIp);
+            res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
+            return res.status(401).send('Logged out.');
+        });
+        web.get('/admin', (req, res) => {
+            res.sendFile(require('path').join(__dirname, '/public/index.html'));
+        });
+        web.get('/portal', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - web client accessing portal - ' + clientIp);
+            res.sendFile(require('path').join(__dirname, "/public/portal.html"));
+        });
+        web.get("/diag", (req, res) => {
+            res.send({
+                state,
+                stat,
+                stat_nv,
+            });
+        });
+        web.get('/data', (req, res) => {
+            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+        });
+        web.get('/test', (req, res) => {
+            res.sendFile(require('path').join(__dirname, "/public/data.html"));
+        });
+        web.get('*', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            let host = req.headers.host;
+
+            if (host === "admin." + cfg.services.dns.localDomain
+                //  || host === cfg.services.dns.localDomain
+            ) {
+               // console.log('webserver - web client - ' + clientIp + " - requesting host: "
+               //     , host, " forwarding to portal");
+                return res.redirect(302, "https://" + cfg.services.dns.localDomain + ":82/admin");
+            }
+            for (let x = 0; x < cfg.services.web.redirect.length; x++) {
+                redirect = cfg.services.web.redirect[x];
+                if (x == 0) {
+                    if (redirect.target
+                        == "change only the target if you dont want portal as the default forward - otherwise leave this string") {
+                        if (host === cfg.services.dns.localDomain || host == cfg.network.interface[0].ip) {
+                         //   console.log('webserver - web client - ' + clientIp + " - requesting host: "
+                           //     , host, " forwarding to admin portal - from redirect list");
+                            return res.redirect(302, "http://" + cfg.services.dns.localDomain + "/portal");
+                        }
+                    }
+                }
+                if (host === redirect.host) {
+               //     console.log('webserver - web client - ' + clientIp + " - requesting host: "
+               //         , host, " forwarding to: " + redirect.target);
+                    return res.redirect(302, redirect.target);
+                }
+            }
+        //    console.log('webserver - web client - ' + clientIp + " - requesting host: "
+          //      , host, " forwarding to: " + "http://" + cfg.services.dns.localDomain + "/portal");
+            return res.redirect(302, "http://" + cfg.services.dns.localDomain + "/portal");
+        });
+        wssPublic.on('connection', (ws, req) => {
+            client = req.socket.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - websocket client connected - ' + clientIp);
+            setInterval(() => {
+                ws.send(JSON.stringify({
+                    stat,
+                    statPlus: {
+                        arpTable: stat_nv.arp[time.min10],
+                        pingDrop: stat_nv.gateways.pingDropsWan,
+                    },
+                    state: { gateways: state.gateways, },
+                    chart: { bandwidth: { x: Date.now(), y: stat.bw[0][1], y2: stat.bw[0][0] } },
+                }));
+            }, 1e3);
+
+            ws.send(JSON.stringify({ cfg: { gateways: cfg.gateways } }));
+
+        });
+        wss.on('connection', (ws, req) => {
+            client = req.socket.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - websocket client connected - ' + clientIp);
+            setInterval(() => { ws.send(JSON.stringify(wsObject())); }, 1e3);
+            ws.send(JSON.stringify({ cfg }));
+
+        });
+        swss.on('connection', (ws, req) => {
+            client = req.socket.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - secure websocket client connected - ' + clientIp);
+            setInterval(() => { ws.send(JSON.stringify(wsObject())); }, 1e3);
+            ws.send(JSON.stringify({ cfg }));
+        });
+        const basicAuth = (req, res, next) => {
+            const authHeader = req.headers['authorization'];
+            if (!authHeader) {
+                res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
+                return res.status(401).send('Authentication required.');
+            }
+            // Decode the Authorization header
+            const base64Credentials = authHeader.split(' ')[1];
+            const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
+            const [username, password] = credentials.split(':');
+            // Check username and password (replace with your actual credentials)
+            const validUsername = 'admin';
+            const validPassword = 'password123';
+            if (username === validUsername && password === validPassword) {
+                return next(); // Authentication successful, proceed to the next middleware
+            }
+            res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
+            return res.status(401).send('Invalid credentials.');
+        };
+        webAdmin.use(basicAuth);
+    },
     dhcp: function () {
         console.log("system    - starting DHCP server...")
         let buffer = '';
@@ -1416,7 +1761,7 @@ server = {
             }
         }
         function service() {
-            let param = cfg.network.services.dhcp;
+            let param = cfg.services.dhcp;
             let buf = [
                 'ddns-update-style none;',
                 'log-facility syslog;',
@@ -1432,107 +1777,22 @@ server = {
                 '  max-lease-time ' + param.leaseMax + ';',
                 (param.blockUnknown ? '  deny unknown-clients;' : ''),
                 '}',
-                '  host Daren-v60 {',
-                '  hardware ethernet a0:4f:85:e6:e7:7b;',
-                '  fixed-address 10.10.0.13;',
-                '}'
+
             ];
-            //  console.log("DHCP Service Config: ", buf);
+            let bufBind;
+            for (let x = 0; x < cfg.services.dhcp.bindings.length; x++) {
+                let binding = cfg.services.dhcp.bindings[x];
+                bufBind = [
+                    'host ' + binding.name + ' {',
+                    '\thardware ethernet ' + binding.mac + ';',
+                    '\tfixed-address ' + binding.ip + ';',
+                    '}'
+                ]
+                buf.push(...bufBind);
+            }
+            console.log(buf);
             fs.writeFileSync("/etc/dhcp/dhcpd.conf", buf.join("\n"));
         }
-    },
-    web: function () {
-        const basicAuth = (req, res, next) => {
-            const authHeader = req.headers['authorization'];
-
-            if (!authHeader) {
-                res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
-                return res.status(401).send('Authentication required.');
-            }
-
-            // Decode the Authorization header
-            const base64Credentials = authHeader.split(' ')[1];
-            const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
-            const [username, password] = credentials.split(':');
-
-            // Check username and password (replace with your actual credentials)
-            const validUsername = 'admin';
-            const validPassword = 'password123';
-
-            if (username === validUsername && password === validPassword) {
-                return next(); // Authentication successful, proceed to the next middleware
-            }
-
-            res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
-            return res.status(401).send('Invalid credentials.');
-        };
-        webAdmin.use(basicAuth);
-        webAdmin.use(express.static(path.app + "/public"));
-        //  web.use(express);
-        web.use(express.static(path.app + "/public"));
-        function wsBoject() {
-            return {
-                stat,
-                statPlus: {
-                    arpTable: stat_nv.arp[time.min10],
-                    pingDrop: stat_nv.gateways.pingDropsWan,
-                },
-                state: {
-                    gateways: state.gateways,
-                },
-                chart: { bandwidth: { x: Date.now(), y: stat.bw[0][1], y2: stat.bw[0][0] } },
-            };
-        }
-        webAdmin.get('/admin', (req, res) => {
-            res.sendFile(require('path').join(__dirname, '/public/index.html'));
-        });
-        webAdmin.get('/data', (req, res) => {
-            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
-        });
-        webAdmin.get('/logout', (req, res) => {
-            console.log('webserver - web client logout - ' + clientIp);
-            res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
-            return res.status(401).send('Logged out.');
-        });
-        web.get('/admin', (req, res) => {
-            res.sendFile(require('path').join(__dirname, '/public/index.html'));
-        });
-        web.get('/portal', (req, res) => {
-            const clientIp = req.ip || req.connection.remoteAddress;
-            console.log('webserver - web client accessing portal - ' + clientIp);
-            res.sendFile(require('path').join(__dirname, "/public/portal.html"));
-        });
-        web.get("/diag", (req, res) => {
-            res.send({
-                state,
-                stat,
-                stat_nv,
-            });
-        });
-        web.get('/test', (req, res) => {
-            res.sendFile(require('path').join(__dirname, "/public/data.html"));
-        });
-        web.get('*', (req, res) => {
-            const clientIp = req.ip || req.connection.remoteAddress;
-            console.log('webserver - web client - ' + clientIp + " - requesting host: " + req.headers.host);
-            if (req.headers.host === "specific-hostname.local") {
-                return res.redirect(302, "http://target-redirect.local");
-            }
-            return res.redirect(302, "http://" + cfg.network.interface[0].ip + ":80/portal");
-        });
-        wss.on('connection', (ws, req) => {
-            const clientIp = req.socket.remoteAddress;
-            console.log('webserver - websocket client connected - ' + clientIp);
-            setInterval(() => { ws.send(JSON.stringify(wsBoject())); }, 1e3);
-            ws.send(JSON.stringify({ cfg }));
-        });
-        swss.on('connection', (ws, req) => {
-            const clientIp = req.socket.remoteAddress;
-            console.log('webserver - secure websocket client connected - ' + clientIp);
-            setInterval(() => { ws.send(JSON.stringify(wsBoject())); }, 1e3);
-            ws.send(JSON.stringify({ cfg }));
-        });
-        // Apply the authentication middleware to secure endpoints
     },
     dnsMasq: function () {        // not in use
         console.log("system    - starting DNS server...")
@@ -1546,7 +1806,7 @@ server = {
             cp.exec("killall -9 dnsmasq");
         });
         function service() {
-            let param = cfg.network.services.dns;
+            let param = cfg.services.dns;
             let buf = [
                 'interface=' + cfg.network.interface[0].if,
                 'bind-interfaces ',
@@ -1570,32 +1830,61 @@ server = {
         services.dns9 = cp.spawn('named', ['-f', '-c', '/etc/bind/named.conf']);
         services.dns9.stdout.on('data', (data) => { console.log("NORMAL DADA: " + data) });
         services.dns9.stderr.on('data', (data) => { console.log("DNS Server: " + data.toString()) });
-        services.dns9.on('close', (code) => {
+        services.dns9.on('close', (code, data) => {
             console.log("system    - Bind9 exited with code: " + code + ", restarting...");
             setTimeout(() => { server.dnsBind9(); }, 3e3);
             cp.exec("killall -9 dnsmasq");
         });
         function service() {
-            let param = cfg.network.services.dns;
-            let forwarders = "forwarders { ";
+            let param = cfg.services.dns;
+            let forwarders = "\tforwarders { ";
             let buf = [
                 'options {',
-                'directory "/var/cache/bind";',
-                'max-cache-size ' + param.cacheSizeMB + "m;",
-                'min-cache-ttl ' + param.cacheTTLmin + ";",
-                'max-cache-ttl ' + param.cacheTTLmax + ";",
-                'rate-limit { responses-per-second 500; };',
-                'dnssec-validation auto;',
-                'listen-on { ' + cfg.network.interface[0].ip + '; };',
-                'listen-on-v6 { ' + 'none' + '; };',
-                'allow-query { any; };',
+                '\tdirectory "/var/cache/bind";',
+                '\tmax-cache-size ' + param.cacheSizeMB + "m;",
+                '\tmin-cache-ttl ' + param.cacheTTLmin + ";",
+                '\tmax-cache-ttl ' + param.cacheTTLmax + ";",
+                '\trate-limit { responses-per-second 500; };',
+                '\tdnssec-validation auto;',
+                '\tlisten-on { ' + cfg.network.interface[0].ip + '; };',
+                '\tlisten-on-v6 { ' + 'none' + '; };',
+                '\tallow-query { any; };',
             ];
-            if (param.cacheNegative) { buf.push('max-ncache-ttl ' + param.cacheTTLneg + ";") }
+            if (param.cacheNegative) { buf.push('\tmax-ncache-ttl ' + param.cacheTTLneg + ";") }
             param.forwarders.forEach(element => { forwarders += element + "; "; });
             forwarders += "};";
             buf.push(forwarders);
             buf.push('};');
-            // console.log("DNS Service Config: ", buf);
+
+            cfg.services.dns.zones[0].domain = cfg.services.dns.localDomain;
+            cfg.services.dns.zones[0].nameServer = "ns1." + cfg.services.dns.localDomain + ".";
+            cfg.services.dns.zones[0].nameServerAddress = cfg.network.interface[0].ip;
+            cfg.services.dns.zones[0].records[0].address = cfg.network.interface[0].ip;
+            cfg.services.dns.zones[0].records[1].address = cfg.network.interface[0].ip;
+
+            for (let x = 0; x < cfg.services.dns.zones.length; x++) {
+                let zone = cfg.services.dns.zones[x];
+                let global = cfg.services.dns.global;
+                console.log("DNS       - creating zone for - " + zone.domain);
+                let bufZone = [
+                    "$TTL\t" + global.ttlS,
+                    "@\tIN\tSOA\t" + zone.nameServer + " admin." + zone.domain + ". (",
+                    "\t\t\t" + "2025020901" + " ; Serial",
+                    "\t\t\t" + global.refresh + " ; Refresh",
+                    "\t\t\t" + global.retry + " ; Retry",
+                    "\t\t\t" + global.expire + " ; Expire",
+                    "\t\t\t" + global.ttlMin + " ) ; Minimum TTL",
+                    "\tIN\tNS\t" + zone.nameServer,
+                ]
+                for (let y = 0; y < cfg.services.dns.zones[x].records.length; y++) {
+                    record = cfg.services.dns.zones[x].records[y];
+                    bufZone.push(record.prefix + "\tIN\t" + record.type + "\t" + record.address + "\t;")
+                }
+                bufZone.push(zone.nameServer.split('.')[0] + "\tIN\tA\t" + zone.nameServerAddress + "\t;");
+                buf.push('zone "' + zone.domain + '" IN { type master; file "/etc/bind/db.' + zone.domain + '"; };');
+                fs.writeFileSync("/etc/bind/db." + zone.domain, bufZone.join("\n"));
+            }
+            console.log(buf)
             fs.writeFileSync("/etc/bind/named.conf", buf.join("\n"));
         }
     },
@@ -1611,7 +1900,7 @@ server = {
             cp.exec("killall -9 dnsmasq");
         });
         function service() {
-            let param = cfg.network.services.portal;
+            let param = cfg.network.portal;
             let buf = [
                 'interface=' + cfg.network.interface[0].if,
                 'address=/#/' + param.dnsServer,
@@ -1637,18 +1926,19 @@ sys = {
         script.getStatSec();
         script.getStat();
 
+
         server.web();
         script.checkRoutes();
         // configure and install nginx on setup, can nginx run inside node?
         app.nft.create();
         if (cfg.network.gateway.startAll) script.nft();
-        if (cfg.network.services.dhcp.enabled) { server.dhcp(); app.getDHCP(); }
-        if (cfg.network.services.dns.enabled) server.dnsBind9();
-        if (cfg.network.services.portal.enabled) server.dnsMasqPortal();
-        if (cfg.vpn.wireguard.client.length > 0) script.vpn.wireguard.clientConnect();
+        if (cfg.services.dhcp.enabled) { server.dhcp(); app.getDHCP(); }
+        if (cfg.services.dns.enabled) server.dnsBind9();
+        if (cfg.network.portal.enabled) server.dnsMasqPortal();
+        if (cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.clientConnect();
 
         app.getConGateways(true);
-        if (cfg.network.services.portal.enabled || cfg.nft.speed.length > 0) {
+        if (cfg.network.portal.enabled || cfg.network.speed.mac.length > 0) {
             console.log("system    - starting ARP tracker")
             app.getArp(cfg.network.interface[0].if);
         }
@@ -1665,7 +1955,7 @@ sys = {
         setInterval(() => {
             app.getConnTotal();
             script.voucher.prune();
-            if (cfg.network.services.dhcp.enabled) app.getDHCP();
+            if (cfg.services.dhcp.enabled) app.getDHCP();
             script.getStat();
         }, 60e3);
         setInterval(() => { app.getConGateways(); }, 300e3);
@@ -1933,11 +2223,14 @@ sys = {
             https = require('https');
             express = require('express');
             WebSocket = require('ws');
-            web = express(); // Captive portal redirect
-            webAdmin = express(); // Admin web server
-            serverWeb = http.createServer(web); // HTTP redirect server (port 80)
-            serverWebAdmin = http.createServer(webAdmin); // Admin HTTP server (port 82)
-            wss = new WebSocket.Server({ server: serverWebAdmin }); // WebSocket on port 82
+            web = express();
+            webAdmin = express();
+            webSecure = express();
+            webPublic = express();
+            eWeb = http.createServer(web); // HTTP redirect server (port 80)
+            eWebPublic = http.createServer(webPublic); // HTTP redirect server (port 80)
+            wss = new WebSocket.Server({ server: eWeb }); // WebSocket on port 82
+            wssPublic = new WebSocket.Server({ server: eWebPublic }); // WebSocket on port 82
             sslOptions = {
                 key: fs.readFileSync(path.app + '/ssl.key'), // Path to your private key
                 cert: fs.readFileSync(path.app + '/ssl.crt'), // Path to your certificate
@@ -1962,11 +2255,13 @@ sys = {
             openssl genrsa -out ssl.key 2048
             openssl req -new -x509 -key ssl.key -out ssl.crt -days 365
             */
-            httpsServer = https.createServer(sslOptions, webAdmin); // HTTPS server (port 443)
-            swss = new WebSocket.Server({ server: httpsServer });   // WSS on HTTPS (port 443)
-            serverWeb.listen(80, () => console.log('webserver - Redirect server running on port 80'));
-            serverWebAdmin.listen(82, () => console.log('webserver - HTTP admin web server running on port 82'));
-            httpsServer.listen(443, () => console.log('webserver - HTTPS admin web server running on port 443'));
+            eWebAdmin = https.createServer(sslOptions, webAdmin); // Admin HTTP server (port 82)
+            eWebSecure = https.createServer(sslOptions, webSecure); // HTTPS server (port 443)
+            swss = new WebSocket.Server({ server: eWebAdmin });   // WSS on HTTPS (port 443)
+            eWeb.listen(80, () => console.log('webserver - Redirect server running on port 80'));
+            eWebPublic.listen(83, () => console.log('webserver - Redirect server running on port 80'));
+            eWebAdmin.listen(82, () => console.log('webserver - HTTP admin web server running on port 82'));
+            eWebSecure.listen(443, () => console.log('webserver - HTTPS admin web server running on port 443'));
         };
         time.startTime();
     },
@@ -1981,7 +2276,7 @@ sys = {
                 "[Install]",
                 "WantedBy=multi-user.target\n",
                 "[Service]",
-                "ExecStart=nodemon /apps/nfsense/nfsense.js -w /apps/nfsense/nfsense.js --exitcrash",
+                "ExecStart=nodemon " + path.app + "nfsense.js -w " + path.app + "nfsense.js -w " + path.app + "nfsense-config.json --exitcrash",
                 "Type=simple",
                 "Restart=always",
                 "RestartSec=10s",
@@ -1993,9 +2288,9 @@ sys = {
             console.log(require('path').basename(__filename))
             cp.execSync("touch /etc/systemd/system/nfsense.service");
             cp.execSync("chown $USER /etc/systemd/system/nfsense.service");
-            fs.writeFileSync("/etc/systemd/system/nfsense.service", server.join("\n"));
+            fs.writeFileSync("/etc/systemd/system/nfsense.service", service.join("\n"));
             cp.execSync("mkdir /apps/nfsense -p");
-            cp.execSync("cp " + path.app + path.appFile + " /apps/nfsense");
+            try { cp.execSync("cp " + path.app + path.appFile + " /apps/nfsense"); } catch { }
             cp.execSync("systemctl daemon-reload");
             cp.execSync("systemctl enable nfsense.service");
             cp.exec("systemctl start nfsense.service");
@@ -2011,7 +2306,7 @@ sys = {
             console.log("service uninstalled!!");
             process.exit();
         }
-        if (process.argv[2] == "-setup") app.setup();
+        if (process.argv[2] == "-setup") script.setup();
         if (process.argv[2] == "-nft") {
             config = [
                 'flush ruleset',
@@ -2025,6 +2320,7 @@ sys = {
                 '\t\ttcp dport 22 accept',
                 '\t\ttcp dport 953 accept',
                 '\t\ttcp dport 80-85 accept',
+                '\t\ttcp dport 443 accept',
                 '\t\tip protocol {tcp, udp} th dport 53 accept',
                 '\t}',
                 '\tchain forward {',
