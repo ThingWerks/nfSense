@@ -14,19 +14,19 @@
   - MAC based netwrok access control
   - captive portal, voucher generator 
   - load balancing and failover
-  - web base traffic and connections monitoring
-  - network performance monitoring 
+  - web based traffic, network performance and connection monitoring
   - quorum based gateway monitoring
   - efortless setup, no complex installation steps
-  - connection stats, like active DHCP and portal users, open sockets per gateway and detailed gateway performance monitoring
+  - connection stats, like active DHCP and portal users, sockets per gateway and detailed gateway performance monitoring
   - intellegent gateway switchover and aggrigation, smart loadbalancing
+  - VPN concentration and hairpinning
 
 #### Unique Capabilities:
-  - have multiple redundant gateways all on one or more interfaces
-  - router on a stick
+  - have multiple redundant gateways all on one (or more) interface
+  - router on a stick (single interface routing)
   - have mutilple network speed profiles based on MAC address
-  - VPN concentration and hairpinning
-  - use a single onsite device as bosth a server and router without the performance hit of running pfsense in a VM
+  - good performance with Realtek network interfaces (unlike pfsense)
+  - have a single onsite device as both server and router with needing a VM; saves energy and hardware budget
 
 #### In Development:
  - user based network login
