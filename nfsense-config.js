@@ -1,6 +1,6 @@
 {
     "log": {
-        "arp": false,
+        "arp": true,
         "dns": false,
         "dhcp": false
     },
@@ -14,47 +14,41 @@
         "wireguard": {
             "client": [
                 {
-                    "name": " ",
-                    "endpoint": " ",
-                    "keyPrivate": "=",
-                    "ketPubl": "=",
-                    "keyServer": "=",
+                    "name": "Elite",
+                    "endpoint": "vpn.-------.com:1020",
+                    "keyPrivate": "-+-/----=",
+                    "keyPublic": "--+----=",
+                    "keyServer": "---------=",
                     "address": "10.255.0.2/24",
                     "networks": "10.255.0.0/24, 10.21.88.0/24, 172.16.255.0/24, 10.22.0.0/23, 10.21.55.0/24",
                     "keepalive": 25
                 }
-            ]
         }
     },
     "network": {
-        "manager": "ifupdown",
         "socketTimeout": 43200,
-        "arpTimeout": 600,
-        "arpRefresh": 4000,
+        "arpTimeout": 120,
+        "arpRefresh": 1000,
+        "saccaraServer": "10.21.88.2",
         "gateway": {
-            "mode": "team",
+            "mode": "teaming",
             "failAll": true,
             "startAll": true,
             "weighted": false
         },
         "portal": {
-            "enabled": false,
-            "dnsServer": "10.10.0.12",
-            "dnsServerPort": 52
+            "enabled": true,
+            "interface": 0
         },
         "interface": [
             {
                 "name": "lan",
-                "if": "enp1s0",
+                "if": "ens1",
                 "subnetCIDR": [
                     "10.10.0.0",
                     19
                 ],
-                "ip": "10.10.0.1"
-            },
-            {
-                "name": "wan",
-                "if": "enp2s0"
+                "ip": "10.10.0.12"
             }
         ],
         "speed": {
@@ -63,20 +57,21 @@
                     "name": "unrestricted"
                 },
                 {
-                    "name": "global",
+                    "name": "guest",
                     "up": 5000,
                     "upBurst": 8000,
                     "down": 5000,
                     "downBurst": 8000
                 },
                 {
-                    "name": "test",
+                    "name": "global",
                     "up": 500,
                     "upBurst": 800,
                     "down": 500,
                     "downBurst": 800
                 }
-            ]
+            ],
+            "ip": []
         }
     },
     "services": {
@@ -89,32 +84,35 @@
                     "target": "change only the target if you dont want portal as the default forward - otherwise leave this string"
                 },
                 {
-                    "host": " . ",
-                    "target": "http:// . :2000"
-                },
-                {
-                    "host": "usfw. .com",
-                    "target": "http://usfw. .com:83/monitor"
+                    "host": "laundry.daren",
+                    "target": "http://laundry.daren:2000"
                 }
             ]
         },
-        "dhcp": {
+        "telegram": {
             "enabled": true,
+            "token": "----------",
+            "admins": [
+                6176063468
+            ]
+        },
+        "dhcp": {
+            "enabled": false,
             "subnet": "10.10.0.0",
             "mask": "255.255.224.0",
-            "rangeStart": "10.10.13.1",
-            "rangeEnd": "10.10.30.255",
+            "rangeStart": "10.10.8.1",
+            "rangeEnd": "10.10.12.255",
             "nameServer": "10.10.0.1",
             "router": "10.10.0.1",
             "broadcast": "10.10.31.255",
-            "domain": " .com",
-            "leaseDefault": 86400,
-            "leaseMax": 86400,
-            "blockUnknown": false,
+            "domain": "thwerks.com",
+            "leaseDefault": 600,
+            "leaseMax": 600,
+            "blockUnknown": true,
             "bindings": [
                 {
-                    "name": " - ",
-                    "mac": "a0:  e7:7b",
+                    "name": "-----",
+                    "mac": "a0:--:85:--:e7:--",
                     "ip": "10.10.0.13"
                 }
             ]
@@ -158,36 +156,14 @@
                     ]
                 },
                 {
-                    "domain": " . ",
-                    "nameServer": "ns1. . .",
+                    "domain": "---.-----",
+                    "nameServer": "ns1.----.----.",
                     "nameServerAddress": "10.10.0.1",
                     "records": [
                         {
                             "prefix": "",
                             "type": "A",
                             "address": "10.10.0.1"
-                        }
-                    ]
-                },
-                {
-                    "domain": "thwerks.com",
-                    "nameServer": "nsfw.",
-                    "nameServerAddress": "10.10.0.1",
-                    "records": [
-                        {
-                            "prefix": "",
-                            "type": "A",
-                            "address": "199.231.113.38"
-                        },
-                        {
-                            "prefix": "usfw",
-                            "type": "A",
-                            "address": "10.10.0.1"
-                        },
-                        {
-                            "prefix": "vpn",
-                            "type": "A",
-                            "address": "199.231.113.38"
                         }
                     ]
                 }
@@ -198,43 +174,17 @@
         {
             "name": "Jesmark",
             "ip": "172.16.10.1",
-            "weight": 10,
-            "comment": [],
-            "uncomment": []
+            "weight": 10
         },
         {
             "name": "Cartegena",
             "ip": "172.16.10.3",
             "weight": 10
-        },
-        {
-            "name": "Dan",
-            "ip": "172.16.10.4",
-            "weight": 10
-        },
-        {
-            "name": "Hablato",
-            "ip": "172.16.10.5",
-            "weight": 10
-        },
-        {
-            "name": "Randall",
-            "ip": "172.16.10.6",
-            "weight": 10
-        },
-        {
-            "name": "Tim",
-            "ip": "172.16.10.7",
-            "weight": 10
-        },
-        {
-            "name": "Sandy",
-            "ip": "172.16.10.10",
-            "weight": 10
         }
     ],
     "monitor": {
         "reconnect": 5,
+        "upstreamHops": 3,
         "lan": {
             "enable": false,
             "interval": 0,
@@ -248,7 +198,7 @@
         },
         "wan": {
             "interval": 0,
-            "samples": 1,
+            "samples": 4,
             "delay": 1000,
             "latencyWarn": 800,
             "latencyError": 1500,
@@ -256,7 +206,8 @@
             "lossError": 80,
             "targets": [
                 "8.8.8.8",
-                "1.1.1.1"
+                "1.1.1.1",
+                "199.231.113.38"
             ]
         }
     }
