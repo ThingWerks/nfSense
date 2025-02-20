@@ -1,0 +1,248 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Captive Portal</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, black, #000066);
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .container {
+      background: #001a33;
+      border: 2px solid #00ffff;
+      border-radius: 20px;
+      padding: 20px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 0 20px #00ffff;
+    }
+
+    .logo {
+      display: block;
+      margin: 0 auto 10px auto;
+      max-width: 150px;
+      height: auto;
+    }
+
+    .welcome {
+      text-align: center;
+      font-size: 1.2em;
+      color: #b3e0ff;
+      margin-bottom: 20px;
+    }
+
+    .rules {
+      font-size: 0.9em;
+      color: #80dfff;
+      margin-bottom: 20px;
+    }
+
+    .rules li {
+      margin-bottom: 5px;
+    }
+
+    .field {
+      margin-bottom: 15px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 0.9em;
+      margin-bottom: 5px;
+    }
+
+    .field input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #00cccc;
+      background: #00264d;
+      color: white;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    button {
+      padding: 10px 15px;
+      border: none;
+      border-radius: 5px;
+      background: #004080;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #0059b3;
+    }
+
+    .help-container {
+      display: none;
+      margin-top: 15px;
+    }
+
+    .help-container textarea {
+      width: 100%;
+      height: 80px;
+      border-radius: 5px;
+      border: 1px solid #00cccc;
+      background: #00264d;
+      color: white;
+      padding: 10px;
+    }
+
+    .message {
+      margin-top: 10px;
+      font-size: 0.9em;
+      color: #b3e0ff;
+    }
+
+    .status {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 1em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="logo.png" alt="Portal Logo" class="logo">
+
+    <div class="welcome">Welcome to the Portal! Enjoy secure internet access.</div>
+
+    <ul class="rules">
+      <li>Usage limited to registered users only.</li>
+      <li>Contact support for any issues.</li>
+      <li>Rates: $5/hour, $20/day.</li>
+    </ul>
+
+    <div class="field">
+      <label for="voucher">Enter Voucher Code</label>
+      <input type="text" id="voucher" placeholder="Enter voucher code">
+    </div>
+
+    <div class="buttons">
+      <button id="submit-btn">Submit</button>
+      <button id="help-btn">Help</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div id="help-container" class="help-container">
+      <textarea id="help-message" placeholder="Describe your issue. Include your name and contact number."></textarea>
+      <button id="send-help">Send</button>
+      <div class="message">Please include your name, contact, and issue details.</div>
+    </div>
+  </div>
+
+  <script>
+       const submitBtn = document.getElementById('submit-btn');
+    const freeInternetBtn = document.getElementById('free-internet-btn');
+    const helpBtn = document.getElementById('help-btn');
+    const helpContainer = document.getElementById('help-container');
+    const statusDiv = document.getElementById('status');
+    const sendHelpBtn = document.getElementById('send-help');
+
+    submitBtn.addEventListener('click', async () => {
+      const voucherCode = document.getElementById('voucher').value;
+      if (!voucherCode) {
+        statusDiv.textContent = 'Please enter a voucher code.';
+        statusDiv.style.color = 'red';
+        return;
+      }
+      try {
+        const response = await fetch('/voucher', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ code: voucherCode })
+        });
+        const result = await response.json();
+        if (result.success) {
+          statusDiv.textContent = 'Code accepted! Redirecting...';
+          statusDiv.style.color = 'green';
+          window.location.href = result.redirectUrl;
+          setTimeout(() => {
+            window.location.href = "http://www.google.com";
+          }, 2000);
+        } else {
+          statusDiv.textContent = 'Code failed. Please try again.';
+          statusDiv.style.color = 'red';
+        }
+      } catch (error) {
+        statusDiv.textContent = 'Error validating code. Try again later.';
+        statusDiv.style.color = 'red';
+      }
+    });
+
+    freeInternetBtn.addEventListener('click', async () => {
+      try {
+        const response = await fetch('/free-internet', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ request: 'free_internet' })
+        });
+
+        if (response.status === 200) {
+          const result = await response.json();
+          statusDiv.textContent = 'Free internet granted! Redirecting...';
+          statusDiv.style.color = 'green';
+          window.location.href = result.redirectUrl;
+          setTimeout(() => {
+            window.location.href = result.redirectUrl;
+          }, 2000);
+          
+        } else {
+          statusDiv.textContent = 'Unexpected response from the server.';
+          statusDiv.style.color = 'red';
+        }
+      } catch (error) {
+        statusDiv.textContent = 'Error processing request. Try again later.';
+        statusDiv.style.color = 'red';
+      }
+    });
+
+    helpBtn.addEventListener('click', () => {
+      helpContainer.style.display = helpContainer.style.display === 'block' ? 'none' : 'block';
+    });
+
+    sendHelpBtn.addEventListener('click', async () => {
+      const helpMessage = document.getElementById('help-message').value;
+      if (!helpMessage) {
+        alert('Please enter a message before sending.');
+        return;
+      }
+      try {
+        await fetch('/send-help', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ message: helpMessage })
+        });
+        alert('Help message sent successfully!');
+        document.getElementById('help-message').value = '';
+        helpContainer.style.display = 'none';
+      } catch (error) {
+        alert('Error sending message. Try again later.');
+      }
+    });
+  </script>
+</body>
+</html>
