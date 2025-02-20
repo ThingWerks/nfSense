@@ -86,6 +86,7 @@
     }
 
     buttonFree {
+      font-size: 0.9em;
       padding: 10px 15px;
       border: none;
       border-radius: 5px;
@@ -93,7 +94,9 @@
       color: white;
       cursor: pointer;
     }
-
+    buttonFree:hover {
+      background: #0059b3;
+    }
     button:hover {
       background: #0059b3;
     }
@@ -174,7 +177,6 @@
         statusDiv.style.color = 'red';
         return;
       }
-
       try {
         const response = await fetch('/voucher', {
           method: 'POST',
@@ -184,7 +186,6 @@
           body: JSON.stringify({ code: voucherCode })
         });
         const result = await response.json();
-
         if (result.success) {
           statusDiv.textContent = 'Code accepted! Redirecting...';
           statusDiv.style.color = 'green';
@@ -201,9 +202,6 @@
         statusDiv.style.color = 'red';
       }
     });
-
-
-
 
     freeInternetBtn.addEventListener('click', async () => {
       try {
@@ -234,9 +232,6 @@
       }
     });
 
-
-
-
     helpBtn.addEventListener('click', () => {
       helpContainer.style.display = helpContainer.style.display === 'block' ? 'none' : 'block';
     });
@@ -247,7 +242,6 @@
         alert('Please enter a message before sending.');
         return;
       }
-
       try {
         await fetch('/send-help', {
           method: 'POST',
