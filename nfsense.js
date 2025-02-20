@@ -1,5 +1,3 @@
-
-debug = true;
 script = {
     setup: function () {
         console.log("updating package list...");
@@ -13,6 +11,8 @@ script = {
         cp.execSync("cd " + path.app + " ; npm i express");
         cp.execSync("cd " + path.app + " ; npm i ws");
         cp.execSync("cd " + path.app + " ; npm i systeminformation");
+        if (cfg.services.telegram.enabled)
+            cp.execSync("cd " + path.app + " ; npm i  node-telegram-bot-api");
 
         console.log("checking if packet forwarding is enabled");
         if (fs.readFileSync("/proc/sys/net/ipv4/ip_forward", 'utf8').includes("0")) {
@@ -180,16 +180,16 @@ script = {
     },
     nft: function () {
         let sequence = [], sequenceAll = [], set = [], numgen = [];
+        for (let x = 0; x < state.gateways.length; x++) {
+            //   console.log(state.gateways[x].status)
+            if (cfg.network.gateway.startAll) {
+                if (state.gateways[x].status == undefined
+                    || state.gateways[x].status.includes("offline") == false) sequence.push(x);
+            } else if (state.gateways[x].status.includes("offline") == false) sequence.push(x);
+            sequenceAll.push([x]);
+        }
         switch (cfg.network.gateway.mode) {
-            case "team":
-                for (let x = 0; x < state.gateways.length; x++) {
-                    //   console.log(state.gateways[x].status)
-                    if (cfg.network.gateway.startAll) {
-                        if (state.gateways[x].status == undefined
-                            || state.gateways[x].status.includes("offline") == false) sequence.push(x);
-                    } else if (state.gateways[x].status.includes("offline") == false) sequence.push(x);
-                    sequenceAll.push([x]);
-                }
+            case "teaming":
                 if (cfg.network.gateway.weighted == true) {
                     let weights;
                     numgen = { mode: "random", mod: 100, offset: 0 };
@@ -228,38 +228,58 @@ script = {
                 nftWrite();
                 break;
             case "failover":
-                switch (ColorMode.network.manager) {
-                    case "netplan":
-                        state.nfTables.data = fs.readFileSync('/etc/netplan/10-dhcp-all-interfaces.yaml', 'utf-8').split(/\r?\n/);
-                        for (let x = 0; x < state.nfTables.data.length; x++) {
-                            if (state.nfTables.data[x].includes("via: ")) {
-                                console.log("gateway found in netplan config, line: " + x);
-                                state.nfTables.line = x;
-                                break;
+                for (let x = 0; x < state.gateways.length; x++) {
+                    let gateway = state.gateways[x];
+                    console.log(gateway.status);
+                    if (state.gatewaySelected != x) {
+                        if (gateway.status == undefined || gateway.status.includes("online")) {
+                            console.log("gateway   - failover - selecting gateway " + cfg.gateways[x].name);
+                            let interface = gateway.interface || cfg.network.interface[1] ? cfg.network.interface[1].if : cfg.network.interface[0].if;
+                            if (cfg.network.portal.enabled) {
+                                nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "'
+                                    + interface + '" masquerade');
+                            } else {
+                                nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
+                                    + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
                             }
+                            cp.exec("ip route delete default", (e) => {
+                                // console.log(e);
+                                cp.exec("ip route add default via " + cfg.gateways[x].ip, (e) => { if (e) console.log(e) });
+                            });
+                            gatewaySelected = x;
+                            break;
                         }
-                        break;
+                    }
                 }
-                nftWrite();
                 break;
         }
         function nftWrite() {
             let buf = [];
-            // set rule for vpn subnets to bypass mangle rule
             app.nft.tables.mangle[1].rule.expr[0].match.right.set[0].prefix.addr = cfg.network.interface[0].subnetCIDR[0];
             app.nft.tables.mangle[1].rule.expr[0].match.right.set[0].prefix.len = cfg.network.interface[0].subnetCIDR[1];
             app.nft.tables.mangle[3].rule.expr[2].mangle.value.map.key.numgen = numgen;
             app.nft.tables.mangle[3].rule.expr[2].mangle.value.map.data.set = set;
-
-            app.nft.tables.mangle[1].rule.expr[0].match.right.set.push({ prefix: { addr: "10.21.55.0", len: 24 } })
-            app.nft.tables.mangle[1].rule.expr[0].match.right.set.push({ prefix: { addr: "10.21.88.0", len: 24 } })
-
+            for (let x = 0; x < cfg.vpn.wireguard.client.length; x++) {
+                let networks = parseIPSubnets(cfg.vpn.wireguard.client[x].networks);
+                //   console.log("nftables  - excluding VPN  networks from mangle rules...");
+                //    console.log(networks)
+                for (let y = 0; y < networks.length; y++) {
+                    app.nft.tables.mangle[1].rule.expr[0].match.right.set.push({ prefix: { addr: networks[y].ip, len: networks[y].subnet } })
+                }
+            }
+            function parseIPSubnets(input) {
+                const pairs = input.split(", ").map(pair => pair.trim());
+                return pairs.map(pair => {
+                    const [ip, subnet] = pair.split("/");
+                    return { ip, subnet: parseInt(subnet, 10) };
+                });
+            }
             //    console.log(app.nft.tables.mangle[1].rule.expr[2].mangle.value.map.data)
             if (state.nfTables.mangle == undefined) {
                 nftCreateTable();
             } else {
                 app.nft.tables.mangle[3].rule.handle = state.nfTables.mangle;
-                console.log("nftables  - updating mangle table...")
+                console.log("nftables  - updating mangle table...");
                 let command = "printf '" + JSON.stringify({ nftables: [{ replace: app.nft.tables.mangle[3] }] }) + "' | nft -j -f -"
                 cp.exec(command, (e) => {
                     if (e) {
@@ -276,16 +296,27 @@ script = {
                 app.nft.tables.mangle.forEach((e) => { buf.push({ add: e }) });
                 let command = "nft delete chain ip mangle prerouting ; printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -"
                 console.log("nftables  - creating mangle rules...")
+
                 cp.exec(command, (e) => {
                     if (e) {
                         console.log("nftables  - error - mangle table missing or command failed - recreating");
                         app.nft.create(false);
-                        cp.exec('nft delete chain ip mangle prerouting ; ' + command, (e) => { if (e) console.error(e); })
+                        cp.exec('nft delete chain ip mangle prerouting ; ' + command, (e) => {
+                            if (e) console.error(e);
+                            if (cfg.network.portal.enabled) {
+                                console.log("nftables  - adding portal disallow rule");
+                                cp.exec("nft insert rule mangle prerouting ip saddr != @allow return");
+                            }
+                        })
+                    } else {
+                        if (cfg.network.portal.enabled) {
+                            console.log("nftables  - adding portal disallow rule");
+                            cp.exec("nft insert rule mangle prerouting ip saddr != @allow return");
+                        }
                     }
                     mangleNum = parse(cp.execSync('nft -a list chain ip mangle prerouting').toString(), 'nfsense_mangle" # handle ', '\n')
                     console.log("nftables  - mangle table rule handle is: " + Number(mangleNum));
                     state.nfTables.mangle = Number(mangleNum);
-                    //  file.write.nv();
                 });
             }
         }
@@ -385,14 +416,14 @@ script = {
             stat_nv.bw[x][1][time.min10] = stat.bw[x][1];
         }
         for (let x = 0; x < cfg.gateways.length; x++) {
-            if (stat_nv.avg5Min.gateways[x]!=undefined)
+            if (stat_nv.avg5Min.gateways[x] != undefined)
                 stat_nv.gateways.pingDropsWan[x]
                     = Math.floor(stat_nv.avg5Min.gateways[x].reduce((a, b) => a + b, 0));
         }
         stat_nv.conntrack[time.min10]
             = Math.floor(stat_nv.avg5Min.conntrack.total.reduce((a, b) => a + b, 0) / 300);
         stat_nv.arp[time.min10] = Math.floor(stat_nv.avg5Min.arp.reduce((a, b) => a + b, 0) / 300);
-        file.write.stat();
+        file.write("stat_nv");
     },
     getStatSec: function () {
         stat_nv.step5Min = stat_nv.step5Min || 0;
@@ -421,43 +452,46 @@ script = {
                 for (let j = 1; j < length; j++) {
                     randomString += charset[Math.floor(Math.random() * charset.length)];
                 }
-                result[randomString] = { duration: (duration * 60 * 60), speed, multi };
+                result[randomString] = { duration: (duration * 60 * 60), speed, multi, created: time.epoch };
             }
             //const vouchertest = script.voucher.generate(10, 3, 86400, 1, false, true);
             console.log("vouchers - creating " + count + " vouchers with a duration of: " + duration + " hours");
+            console.log(result);
             Object.assign(voucher, result);
-            file.write.voucher();
+            file.write("voucher");
+            return result
         },
-        find: function (code, mac) {  // runs when someone click submit on portal login page
+        use: function (code, mac) {  // runs when someone click submit on portal login page
             if (voucher[code] && arp[mac]) {
                 if (voucher[code].ip != undefined) {
-                    if (voucher[code].multi == 0) {
-                        console.log("vouchers - relogin - code: " + code + ", for mac: " + mac + " - clearing old IPs");
+                    if (voucher[code].multi === false) {
+                        console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - clearing old IPs");
                         script.voucher.nft(voucher[code].ip, voucher[code].speed, "delete");
                         voucher[code].ip = [arp[mac].ip];
                         voucher[code].mac = mac;
                         script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
                     } else if (voucher[code].ip.length <= voucher[code].multi) {
-                        console.log("vouchers - relogin - code: " + code + ", for mac: " + mac + " - adding new IP");
+                        console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - adding new IP");
                         script.voucher.nft(voucher[code].ip, voucher[code].speed, "add");
                         voucher[code].ip.push(arp[mac].ip)
                         script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
-                    } else console.log("vouchers - relogin - code: " + code + ", for mac: " + mac + " - no more slots, disallowed");
+                    } else console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - no more slots, disallowed");
+                    file.write("voucher");
+                    voucher[code].update = time.epoch;
+                    return true;
                 } else {
                     voucher[code].mac = mac;
                     voucher[code].activated = time.epoch;
+                    voucher[code].update = time.epoch;
                     voucher[code].ip = [arp[mac].ip];
                     // console.log(voucher[code])
-                    console.log("vouchers - adding voucher: " + code + ", for mac: " + mac + ", with IP: " + arp[mac].ip
+                    console.log("vouchers  - adding voucher: " + code + ", for mac: " + mac + ", with IP: " + arp[mac].ip
                         + " - expires in: " + (voucher[code].duration / 60) + " min");
-
-
-                    script.voucher.nft({ [voucher[code].speed]: { ip: arp[mac].ip } }, "add");
-
-
+                    script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
+                    file.write("voucher");
+                    return true;
                 }
-                file.write.voucher();
-            }
+            } else return false;
         },
         prune: function () {
             for (const code in voucher) {
@@ -467,15 +501,29 @@ script = {
                         + voucher[code].mac + " removing IP: ", voucher[code].ip);
                     script.voucher.nft(voucher[code].ip, voucher[code].speed, "delete");
                     voucher[code] = undefined;
-                    file.write.voucher();
+                    file.write("voucher");
                 }
             }
         },
+        pruneGuest: function () {
+            if (guest[code] != undefined && guest[code].activated != undefined
+                && time.epoch - guest[code].activated >= guest[code].duration) {
+                console.log("guest voucher - session expired - code: " + code + ", for MAC: "
+                    + guest[code].mac + " removing IP: ", guest[code].ip);
+                script.voucher.nft(guest[code].ip, guest[code].speed, "delete");
+                guest[code] = undefined;
+                file.write("voucher");
+            }
+        },
         nft: function (ip, speed, action) {
-            cp.exec(" nft " + action + " element ip nat allow { " + ip + " }"
-                + " ; nft " + action + " element ip mangle allow { " + ip + " }"
-                + ";  nft " + action + " element ip filter " + cfg.network.speed.macs[speed].name + " { " + ip + " }"
-                , (e) => { if (e) console.error(e); });
+            let buf = ""
+            buf += " nft " + action + " element ip nat allow { " + ip + " }";
+            if (cfg.network.portal.enabled) {
+                if (cfg.network.gateway.mode == "teaming")
+                    buf += "; nft " + action + " element ip mangle allow { " + ip + " }";
+                buf += ";  nft " + action + " element ip filter " + cfg.network.speed.mac[speed].name + " { " + ip + " }";
+            }
+            cp.exec(buf, (e) => { if (e) console.error(e); });
         },
     },
 }
@@ -483,6 +531,7 @@ app = {
     nft: {
         create: function (flush) {
             nft = app.nft.command;
+            state.gatewaySelected = undefined;
 
             if (flush !== false) {
                 console.log("nftables  - flushing all speed limiter tables");
@@ -491,28 +540,36 @@ app = {
 
             nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept");
 
-            if (cfg.network.speed.mac[1] != undefined) {
-                console.log("nftables  - speed - setting global limit");
+            if (cfg.network.speed.mac[1] != undefined || cfg.network.speed.ip.length > 0) {
                 nft.delete("filter forward", "speed_unrestricted");
                 cp.execSync('nft add chain ip filter speed_limiter');
-                nft.add("filter forward", "speed_jump", "jump speed_limiter");
                 cp.execSync('nft flush chain ip filter speed_limiter');
+                nft.add("filter forward", "speed_jump", "jump speed_limiter");
                 cp.execSync('nft add rule ip filter speed_limiter ct state new ip daddr 0.0.0.0/0 accept');
-                nft.speedMAC();
             } else {
                 console.log("nftables  - speed - setting no limiters");
                 nft.delete("filter forward", "speed_jump");
                 nft.add("filter forward", "speed_unrestricted", "ct state related,established ip daddr 0.0.0.0/0 accept");
             }
 
+            if (cfg.network.speed.ip.length > 0) {
+                console.log("nftables  - speed - creating MAC limiters");
+                nft.speedIP();
+            }
+            if (cfg.network.speed.mac[1] != undefined) {
+                console.log("nftables  - speed - creating MAC limiters");
+                nft.speedMAC();
+            }
+
             if (cfg.network.portal.enabled) {
                 if (flush !== false) {
                     nft.flush("nat", "allow");
                     nft.flush("mangle", "allow");
+                    cp.execSync('nft flush chain ip nat prerouting');
                 }
                 nft.update("nat prerouting", "nat_portal_redirect_dns", 'ip saddr != @allow udp dport 53 dnat to '
                     + cfg.network.interface[0].ip + ':52');
-                nft.update("nat prerouting", "nat_portal_redirect_http", 'ip saddr != @allow tcp dport 88 dnat to '
+                nft.update("nat prerouting", "nat_portal_redirect_http", 'ip saddr != @allow tcp dport 80 dnat to '
                     + cfg.network.interface[0].ip + ':80');
                 nft.update("nat prerouting", "nat_portal_redirect_https", 'ip saddr != @allow tcp dport 443 dnat to '
                     + cfg.network.interface[0].ip + ':443');
@@ -810,7 +867,7 @@ app = {
                 return Number(handleNum);
             },
             speedMAC: function () {
-                let buf = [
+                let buf = [     // unrestricted class rules
                     {
                         add:
                         {
@@ -931,14 +988,14 @@ app = {
                 for (let x = 0; x < cfg.network.speed.mac.length; x++) {
                     rule = cfg.network.speed.mac[x];
                     if (x != 0) {
-                        console.log("nftables  - creating mac based speed limiter rule - " + rule.name);
+                        console.log("nftables  - creating MAC based speed limiter rule - " + rule.name);
                         buf.push({
                             add: {
                                 rule: {
                                     family: "ip",
                                     table: "filter",
                                     chain: "speed_limiter",
-                                    comment: "nfsense_speed_in_" + rule.name,
+                                    comment: "nfsense_mac_speed_download_" + rule.name,
                                     expr: [
                                         {
                                             match: {
@@ -974,24 +1031,21 @@ app = {
                                                     }
                                                 },
                                                 size: 2048,
-                                                name: rule.name + "_down"
+                                                name: rule.name + "_mac_download"
                                             }
                                         },
-                                        {
-                                            accept: null
-                                        }
+                                        { accept: null }
                                     ]
                                 }
                             }
                         })
                         buf.push({
                             add: {
-
                                 rule: {
                                     family: "ip",
                                     table: "filter",
                                     chain: "speed_limiter",
-                                    comment: "nfsense_speed_out_" + rule.name,
+                                    comment: "nfsense_mac_speed_upload_" + rule.name,
                                     expr: [
                                         {
                                             match: {
@@ -1011,9 +1065,7 @@ app = {
                                             match: {
                                                 op: "==",
                                                 left: { payload: { protocol: "ip", field: "daddr" } },
-                                                right: {
-                                                    prefix: { addr: "0.0.0.0", len: 0 }
-                                                }
+                                                right: { prefix: { addr: "0.0.0.0", len: 0 } }
                                             }
                                         },
                                         {
@@ -1029,12 +1081,10 @@ app = {
                                                     }
                                                 },
                                                 size: 2048,
-                                                name: rule.name + "_up"
+                                                name: rule.name + "_mac_upload"
                                             }
                                         },
-                                        {
-                                            accept: null
-                                        }
+                                        { accept: null }
                                     ]
                                 }
 
@@ -1045,135 +1095,105 @@ app = {
                 cp.execSync("printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -");
             },
             speedIP: function () {
-                let buf = [
-                    {
-                        add:
-                        {
-                            rule: {
-                                family: "ip",
-                                table: "filter",
-                                chain: "speed_limiter",
-                                handle: 20,
-                                expr: [
-                                    {
-                                        match: {
-                                            op: "in",
-                                            left: {
-                                                ct: {
-                                                    key: "state"
-                                                }
-                                            },
-                                            right: [
-                                                "established",
-                                                "related"
-                                            ]
-                                        }
-                                    },
-                                    {
-                                        match: {
-                                            op: "==",
-                                            left: {
-                                                payload: {
-                                                    protocol: "ip",
-                                                    field: "saddr"
-                                                }
-                                            },
-                                            right: {
-                                                prefix: {
-                                                    addr: "0.0.0.0",
-                                                    len: 0
-                                                }
-                                            }
-                                        }
-                                    },
-                                    {
-                                        match: {
-                                            op: "==",
-                                            left: {
-                                                payload: {
-                                                    protocol: "ip",
-                                                    field: "daddr"
-                                                }
-                                            },
-                                            right: "@unrestricted"
-                                        }
-                                    },
-                                    {
-                                        accept: null
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    {
-                        add: {
-                            rule: {
-                                family: "ip",
-                                table: "filter",
-                                chain: "speed_limiter",
-                                expr: [
-                                    {
-                                        match: {
-                                            op: "in",
-                                            left: {
-                                                ct: {
-                                                    key: "state"
-                                                }
-                                            },
-                                            right: [
-                                                "established",
-                                                "related"
-                                            ]
-                                        }
-                                    },
-                                    {
-                                        match: {
-                                            op: "==",
-                                            left: {
-                                                payload: {
-                                                    protocol: "ip",
-                                                    field: "saddr"
-                                                }
-                                            },
-                                            right: "@unrestricted"
-                                        }
-                                    },
-                                    {
-                                        match: {
-                                            op: "==",
-                                            left: {
-                                                payload: {
-                                                    protocol: "ip",
-                                                    field: "daddr"
-                                                }
-                                            },
-                                            right: {
-                                                prefix: {
-                                                    addr: "0.0.0.0",
-                                                    len: 0
-                                                }
-                                            }
-                                        }
-                                    },
-                                    {
-                                        accept: null
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                ];
-                for (let x = 0; x < cfg.network.speed.mac.length; x++) {
-                    rule = cfg.network.speed.mac[x];
-                    if (x != 0) {
-                        console.log("nftables  - creating mac based speed limiter rule - " + rule.name);
+                let buf = [];   // unrestricted class rules
+                for (let x = 0; x < cfg.network.speed.ip.length; x++) {
+                    rule = cfg.network.speed.ip[x];
+                    if (rule.up == undefined) {
+                        console.log("nftables  - creating IP based unrestricted upload speed limiter rule - " + rule.name);
                         buf.push({
                             add: {
                                 rule: {
                                     family: "ip",
                                     table: "filter",
                                     chain: "speed_limiter",
-                                    comment: "nfsense_speed_in_" + rule.name,
+                                    comment: "nfsense_ip_unlimited_speed_upload_" + rule.name,
+                                    expr: [
+                                        {
+                                            match: {
+                                                op: "in",
+                                                left: { ct: { key: "state" } },
+                                                right: ["established", "related"]
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "saddr" } },
+                                                right: { range: rule.range }
+                                            }
+                                        },
+                                        {
+                                            match: {
+                                                op: "==",
+                                                left: { payload: { protocol: "ip", field: "daddr" } },
+                                                right: { prefix: { addr: "0.0.0.0", len: 0 } }
+                                            }
+                                        },
+                                        { accept: null }
+                                    ]
+                                }
+                            }
+                        })
+                    } else {
+                        console.log("nftables  - creating IP based upload speed limiter rule - " + rule.name);
+                        buf.push({
+                            rule: {
+                                family: "ip",
+                                table: "filter",
+                                chain: "speed_limiter",
+                                comment: "nfsense_ip_speed_upload_" + rule.name,
+                                expr: [
+                                    {
+                                        match: {
+                                            op: "in",
+                                            left: { ct: { key: "state" } },
+                                            right: ["established", "related"]
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: { payload: { protocol: "ip", field: "saddr" } },
+                                            right: { range: rule.range }
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: { payload: { protocol: "ip", field: "daddr" } },
+                                            right: { prefix: { addr: "0.0.0.0", len: 0 } }
+                                        }
+                                    },
+                                    {
+                                        meter: {
+                                            key: { payload: { protocol: "ip", field: "saddr" } },
+                                            stmt: {
+                                                limit: {
+                                                    rate: Math.round(rule.up / 8),
+                                                    burst: Math.round(rule.upBurst / 8),
+                                                    per: "second",
+                                                    rate_unit: "kbytes",
+                                                    burst_unit: "kbytes"
+                                                }
+                                            },
+                                            size: 2048,
+                                            name: rule.name + "_ip_upload"
+                                        }
+                                    },
+                                    { accept: null }
+                                ]
+                            }
+                        })
+                    }
+                    if (rule.down == undefined) {
+                        console.log("nftables  - creating IP based unrestricted download speed limiter rule - " + rule.name);
+                        buf.push({
+                            add: {
+                                rule: {
+                                    family: "ip",
+                                    table: "filter",
+                                    chain: "speed_limiter",
+                                    comment: "nfsense_ip_unlimited_speed_download_" + rule.name,
                                     expr: [
                                         {
                                             match: {
@@ -1193,86 +1213,64 @@ app = {
                                             match: {
                                                 op: "==",
                                                 left: { payload: { protocol: "ip", field: "daddr" } },
-                                                right: "@" + rule.name
+                                                right: { range: rule.range }
                                             }
                                         },
-                                        {
-                                            meter: {
-                                                key: { payload: { protocol: "ip", field: "daddr" } },
-                                                stmt: {
-                                                    limit: {
-                                                        rate: Math.round(rule.down / 8),
-                                                        burst: Math.round(rule.downBurst / 8),
-                                                        per: "second",
-                                                        rate_unit: "kbytes",
-                                                        burst_unit: "kbytes"
-                                                    }
-                                                },
-                                                size: 2048,
-                                                name: rule.name + "_down"
-                                            }
-                                        },
-                                        {
-                                            accept: null
-                                        }
+                                        { accept: null }
                                     ]
                                 }
                             }
                         })
+                    } else {
+                        console.log("nftables  - creating IP based download speed limiter rule - " + rule.name);
                         buf.push({
-                            add: {
-
-                                rule: {
-                                    family: "ip",
-                                    table: "filter",
-                                    chain: "speed_limiter",
-                                    comment: "nfsense_speed_out_" + rule.name,
-                                    expr: [
-                                        {
-                                            match: {
-                                                op: "in",
-                                                left: { ct: { key: "state" } },
-                                                right: ["established", "related"]
-                                            }
-                                        },
-                                        {
-                                            match: {
-                                                op: "==",
-                                                left: { payload: { protocol: "ip", field: "saddr" } },
-                                                right: "@" + rule.name
-                                            }
-                                        },
-                                        {
-                                            match: {
-                                                op: "==",
-                                                left: { payload: { protocol: "ip", field: "daddr" } },
-                                                right: {
-                                                    prefix: { addr: "0.0.0.0", len: 0 }
-                                                }
-                                            }
-                                        },
-                                        {
-                                            meter: {
-                                                key: { payload: { protocol: "ip", field: "saddr" } },
-                                                stmt: {
-                                                    limit: {
-                                                        rate: Math.round(rule.up / 8),
-                                                        burst: Math.round(rule.upBurst / 8),
-                                                        per: "second",
-                                                        rate_unit: "kbytes",
-                                                        burst_unit: "kbytes"
-                                                    }
-                                                },
-                                                size: 2048,
-                                                name: rule.name + "_up"
-                                            }
-                                        },
-                                        {
-                                            accept: null
+                            rule: {
+                                family: "ip",
+                                table: "filter",
+                                chain: "speed_limiter",
+                                comment: "nfsense_ip_speed_download_" + rule.name,
+                                expr: [
+                                    {
+                                        match: {
+                                            op: "in",
+                                            left: { ct: { key: "state" } },
+                                            right: ["established", "related"]
                                         }
-                                    ]
-                                }
-
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: {
+                                                payload: { protocol: "ip", field: "saddr" }
+                                            },
+                                            right: { prefix: { addr: "0.0.0.0", len: 0 } }
+                                        }
+                                    },
+                                    {
+                                        match: {
+                                            op: "==",
+                                            left: { payload: { protocol: "ip", field: "daddr" } },
+                                            right: { range: rule.range }
+                                        }
+                                    },
+                                    {
+                                        meter: {
+                                            key: { payload: { protocol: "ip", field: "daddr" } },
+                                            stmt: {
+                                                limit: {
+                                                    rate: Math.round(rule.down / 8),
+                                                    burst: Math.round(rule.downBurst / 8),
+                                                    per: "second",
+                                                    rate_unit: "kbytes",
+                                                    burst_unit: "kbytes"
+                                                }
+                                            },
+                                            size: 2048,
+                                            name: rule.name + "_ip_download"
+                                        }
+                                    },
+                                    { accept: null }
+                                ]
                             }
                         })
                     }
@@ -1406,7 +1404,7 @@ app = {
     },
     getArp: function (filterInterface) {
         function readArpTable() {
-            let buf = { add: {}, delete: {} }, vouchers = {};
+            let buf = { add: {}, delete: {} };
             fs.readFile("/proc/net/arp", 'utf8', (err, data) => {
                 if (err) {
                     console.error('Failed to read /proc/net/arp:', err);
@@ -1419,19 +1417,25 @@ app = {
                     buf.add = {}
                     for (const mac in changes.added) {
                         if (user[mac] && user[mac].speed == 0) {
-                            console.log("ARP - urestricted user connection - mac: ", mac, " - ip: ", changes.added[mac].ip);
+                            console.log("ARP      - urestricted user connection - mac: ", mac, " - ip: ", changes.added[mac].ip);
                         }
                         if (cfg.network.portal.enabled == true) {
                             if (user[mac]) {
                                 findUser(mac, changes.added[mac].ip, buf.add);
+                            } else if (guest[mac]) {
+                                console.log("ARP      - returning guest session - MAC: ", mac, ", with IP: ", changes.added[mac].ip);
+                                guest[mac].update = time.epoch;
+                                if (buf.add.guest == undefined) buf.add.guest = { ip: [] };
+                                buf.add.guest.ip.push(changes.added[mac].ip);
                             }
                         } else { findUser(mac, changes.added[mac].ip, buf.add); }
                         for (const code in voucher) {
                             if (voucher[code] != undefined && voucher[code].mac != undefined && voucher[code].mac == mac) {
                                 console.log("vouchers - resuming session - code: " + code + ", for mac: ", mac, ", with IP: ", changes.added[mac].ip);
-                                //    if (vouchers[voucher[code].speed] == undefined) vouchers[voucher[code].speed] = { ip: [] }
-                                //  vouchers[voucher[code].speed].ip.push(newTable[mac].ip)
-                                script.voucher.nft(changes.added[mac].ip, voucher[code].speed, "add");
+                                voucher[code].ip = changes.added[mac].ip;
+                                voucher[code].update = time.epoch;
+                                if (buf.add[voucher[code].speed] == undefined) buf.add[voucher[code].speed] = { ip: [] };
+                                buf.add[voucher[code].speed].ip.push(changes.added[mac].ip);
                             }
                         }
                     }
@@ -1470,56 +1474,58 @@ app = {
                 }
             });
             function findUser(mac, ip, tbuf) {
-                let speed;
-                if (user == undefined || user[mac] == undefined) speed = "global";
-                else speed = cfg.network.speed.mac[user[mac].speed].name;
-                if (tbuf[speed] == undefined) tbuf[speed] = { ip: [] }
-                tbuf[speed].ip.push(...ip);
+                let speed;  // make an object array for each speed profile
+                if (user == undefined || user[mac] == undefined) speed = "global";  // if this isnt a registed list, assign global profile 
+                else speed = cfg.network.speed.mac[user[mac].speed].name;           // otherwisee use registered users assigned speed
+                if (tbuf[speed] == undefined) tbuf[speed] = { ip: [] }              // if the object array for this speed doesnt exist, create it
+                tbuf[speed].ip.push(...ip);                                         // push this new ip into the correct speed object array
             }
         }
         function nftUpdate(type, object) {
             for (const speed in object) {
+                let buf = "";
                 if (cfg.log.arp) console.log("nftables  - " + type + " IPs: ", object[speed].ip, " for speed class ", speed);
-                cp.exec(" nft " + type + " element ip filter " + speed + " { " + object[speed].ip + " }"
-                    + ((cfg.network.portal.enabled) ?
-                        " ; nft " + type + " element ip nat allow { " + object[speed].ip + " }" : "")
-                    + ((cfg.network.portal.enabled) ?
-                        " ; nft " + type + " element ip mangle allow { " + object[speed].ip + " }" : "")
-                    , (e) => {
-                        if (e) {
-                            //  console.log(e);
-                            if (e.message.includes("Command failed:  nft add element ip")) {
-                                console.log("ARP - flushing NF and ARP tables");
-                                app.nft.create(true);
-                                script.nft();
-                                state.tableFlushes++;
-                                arp = {};
-                            } else {
-                                state.tableRemovalFail++;
-                                console.log("ARP - bulk ip address removal failed");
-                                const regex = /element ip filter (\S+) \{([^}]*)\}/;
-                                const match = e.message.match(regex);
-                                if (match && match[1] && match[2]) {
-                                    const elementName = match[1]; // Capture the element name (e.g., "global")
-                                    const ipAddresses = match[2].split(",").map((ip) => ip.trim()); // Extract and trim IPs
-                                    console.log(`Retrying for element "${elementName}" with individual IP addresses:`, ipAddresses);
-                                    // Retry the command for each individual IP address
-                                    ipAddresses.forEach((ip) => {
-                                        const retryCommand = `nft delete element ip filter ${elementName} { ${ip} }`;
-                                        cp.exec(retryCommand, (err, out, errOut) => {
-                                            if (err) {
-                                                console.error(`Failed for IP ${ip} in element "${elementName}":`, err.message);
-                                            } else {
-                                                console.log(`Success for IP ${ip} in element "${elementName}"`);
-                                            }
-                                        });
+                buf += " nft " + type + " element ip filter " + speed + " { " + object[speed].ip + " }";
+                if (cfg.network.portal.enabled) {
+                    if (cfg.network.gateway.mode == "teaming")
+                        buf += " ; nft " + type + " element ip mangle allow { " + object[speed].ip + " }";
+                    buf += " ; nft " + type + " element ip nat allow { " + object[speed].ip + " }";
+                }
+                cp.exec(buf, (e) => {
+                    if (e) {
+                        //  console.log(e);
+                        if (e.message.includes("Command failed:  nft add element ip")) {
+                            console.log("ARP      - flushing NF and ARP tables");
+                            app.nft.create(true);
+                            script.nft();
+                            state.tableFlushes++;
+                            arp = {};
+                        } else {
+                            state.tableRemovalFail++;
+                            console.log("ARP      - bulk ip address removal failed");
+                            const regex = /element ip filter (\S+) \{([^}]*)\}/;
+                            const match = e.message.match(regex);
+                            if (match && match[1] && match[2]) {
+                                const elementName = match[1]; // Capture the element name (e.g., "global")
+                                const ipAddresses = match[2].split(",").map((ip) => ip.trim()); // Extract and trim IPs
+                                console.log(`Retrying for element "${elementName}" with individual IP addresses:`, ipAddresses);
+                                // Retry the command for each individual IP address
+                                ipAddresses.forEach((ip) => {
+                                    const retryCommand = `nft delete element ip filter ${elementName} { ${ip} }`;
+                                    cp.exec(retryCommand, (err, out, errOut) => {
+                                        if (err) {
+                                            console.error(`Failed for IP ${ip} in element "${elementName}":`, err.message);
+                                        } else {
+                                            console.log(`Success for IP ${ip} in element "${elementName}"`);
+                                        }
                                     });
-                                } else {
-                                    console.error("No element name or IP addresses found in the error message.");
-                                }
+                                });
+                            } else {
+                                console.error("No element name or IP addresses found in the error message.");
                             }
                         }
-                    });
+                    }
+                });
             }
         }
         function parseArpTable(data) {
@@ -1568,10 +1574,9 @@ app = {
 }
 server = {
     web: function () {
+        web.use(express.json());
         webAdmin.use('/admin', express.static(path.app + '/public'));
-        web.use('/admin', express.static(path.app + '/public'));
-
-        //  webPublic.use('/', express.static(path.app + '/monitor'));
+        web.use('/', express.static(path.app + '/public'));
         webPublic.use('/monitor', express.static(path.app + '/monitor'));
         function wsObject() {
             return {
@@ -1611,8 +1616,77 @@ server = {
         web.get('/portal', (req, res) => {
             client = req.ip || req.connection.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - web client accessing portal - ' + clientIp);
+            //   console.log('webserver - web client accessing portal - ' + clientIp);
             res.sendFile(require('path').join(__dirname, "/public/portal.html"));
+        });
+        web.get('/welcome', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            console.log('webserver - web client accessing portal - ' + clientIp);
+            res.sendFile(require('path').join(__dirname, "/public/welcome.html"));
+        });
+        web.post('/voucher', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            let clientMac;
+            for (const mac in arp)
+                if (clientIp == arp[mac].ip) clientMac = mac;
+            const { code } = req.body;
+            if (script.voucher.use(code, clientMac)) {
+                res.status(200).json({ success: true, redirectUrl: "http://" + cfg.network.interface[0].ip + "/welcome" });
+            } else {
+                console.log("portal    - voucher valifdation failed, code: ", code);
+                res.json({ success: false });
+            }
+        });
+        web.post('/free-internet', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            let clientMac;
+            for (const mac in arp)
+                if (clientIp == arp[mac].ip) clientMac = mac;
+            //    console.log('portal    - free internet request from: ', clientIp, " MAC: " + clientMac);
+            guest[clientMac] = { ip: clientIp, activated: time.epoch, update: time.epoch }
+            console.log("portal    - free internet request from: ", guest)
+            let buf = "";
+            for (let x = 0; x < cfg.network.speed.mac.length; x++) {
+                if (cfg.network.speed.mac[x].name == "guest") {
+                    console.log("portal    - adding guest to guest speed limiter");
+                    buf += " nft add element ip filter guest { " + clientIp + " } ";
+                    break;
+                }
+            }
+            if (cfg.network.gateway.mode == "teaming") {
+                console.log("portal    - adding guest to mangle allow list");
+                buf += " ; nft add element ip mangle allow { " + clientIp + " }";
+            }
+            console.log("portal    - adding guest to NAT allow list");
+            buf += " ; nft add element ip nat allow { " + clientIp + " }";
+            // console.log(buf)
+            cp.exec(buf, (e) => { if (e) console.log(e) });
+            res.status(200).json({ success: true, redirectUrl: "http://" + cfg.network.interface[0].ip + "/welcome" });
+            file.write("guest");
+        });
+        web.post('/send-help', (req, res) => {
+            client = req.ip || req.connection.remoteAddress
+            const clientIp = client.substring(client.lastIndexOf(":") + 1);
+            let clientMac;
+            for (const mac in arp)
+                if (clientIp == arp[mac].ip) clientMac = mac;
+
+
+            console.log('portal    - Help message received for IP: ' + clientIp + ", MAC: " + clientMac + " - ", req.body);
+            let message = req.body.message;
+            if (message == "mac" || message == "Mac") {
+                for (let x = 0; x < cfg.services.telegram.admins.length; x++) {
+                    bot.sendMessage(cfg.services.telegram.admins[x], 'MAC address for IP: ' + clientIp + " is: " + clientMac);
+                }
+            } else {
+                for (let x = 0; x < cfg.services.telegram.admins.length; x++) {
+                    bot.sendMessage(cfg.services.telegram.admins[x], 'Portal help request: ' + req.body.message);
+                }
+            }
+            res.send('Help message received');
         });
         web.get("/diag", (req, res) => {
             res.send({
@@ -1635,31 +1709,36 @@ server = {
             if (host === "admin." + cfg.services.dns.localDomain
                 //  || host === cfg.services.dns.localDomain
             ) {
-               // console.log('webserver - web client - ' + clientIp + " - requesting host: "
-               //     , host, " forwarding to portal");
+                // console.log('webserver - web client - ' + clientIp + " - requesting host: "
+                //     , host, " forwarding to portal");
                 return res.redirect(302, "https://" + cfg.services.dns.localDomain + ":82/admin");
             }
             for (let x = 0; x < cfg.services.web.redirect.length; x++) {
                 redirect = cfg.services.web.redirect[x];
                 if (x == 0) {
+                    /////////////  console.log("host request: " + host)
                     if (redirect.target
                         == "change only the target if you dont want portal as the default forward - otherwise leave this string") {
-                        if (host === cfg.services.dns.localDomain || host == cfg.network.interface[0].ip) {
-                         //   console.log('webserver - web client - ' + clientIp + " - requesting host: "
-                           //     , host, " forwarding to admin portal - from redirect list");
-                            return res.redirect(302, "http://" + cfg.services.dns.localDomain + "/portal");
+                        if (host === cfg.services.dns.localDomain
+                            || host == "connectivitycheck.gstatic.com"
+                            || host == "www.google.com") {
+                            //    console.log("host redirect: " + host)
+                            //   console.log('webserver - web client - ' + clientIp + " - requesting host: "
+                            //     , host, " forwarding to admin portal - from redirect list");
+                            return res.redirect(302, "http://" + cfg.network.interface[cfg.network.portal.interface].ip + "/portal");
                         }
                     }
                 }
                 if (host === redirect.host) {
-               //     console.log('webserver - web client - ' + clientIp + " - requesting host: "
-               //         , host, " forwarding to: " + redirect.target);
+                    //     console.log('webserver - web client - ' + clientIp + " - requesting host: "
+                    //         , host, " forwarding to: " + redirect.target);
                     return res.redirect(302, redirect.target);
                 }
             }
-        //    console.log('webserver - web client - ' + clientIp + " - requesting host: "
-          //      , host, " forwarding to: " + "http://" + cfg.services.dns.localDomain + "/portal");
-            return res.redirect(302, "http://" + cfg.services.dns.localDomain + "/portal");
+            // console.log('webserver - web client - ' + clientIp + " - requesting host: "
+            //     , host, " forwarding to: " + "http://" + cfg.network.interface[cfg.network.portal.interface].ip + "/portal");
+            return res.redirect(302, "http://" + cfg.network.interface[cfg.network.portal.interface].ip + "/portal");
+            // return res.redirect(302, "http://" + cfg.network.interface[0].ip + "/portal");
         });
         wssPublic.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
@@ -1715,6 +1794,119 @@ server = {
             return res.status(401).send('Invalid credentials.');
         };
         webAdmin.use(basicAuth);
+    },
+    telegram: function () {
+        const userState = {};
+        bot.setMyCommands([
+            { command: '/vouchers', description: 'Create Wouchers' },
+            { command: '/add_permanent', description: 'Add Permanent MAC' },
+        ]).then(() => {
+            console.log('telegram  - channel commands have been set');
+        });
+        bot.onText(/\/vouchers/, (msg) => {
+            const chatId = msg.chat.id;
+            userState[chatId] = { step: 'askQuantity' }; // Track user state
+            bot.sendMessage(chatId, 'Create many vouchers?');
+        });
+        bot.onText(/\/add_permanent/, (msg) => {
+            const chatId = msg.chat.id;
+            userState[chatId] = { step: 'askName' }; // Start by asking for a name
+            bot.sendMessage(chatId, 'Enter name for permanent MAC:');
+        });
+        bot.on('message', (msg) => {
+            console.log(msg)
+            const chatId = msg.chat.id;
+            if (!userState[chatId]) return;
+            const userInput = msg.text;
+            switch (userState[chatId].step) {
+                case 'askQuantity':
+                    if (isNaN(userInput) || parseInt(userInput) <= 0) {
+                        bot.sendMessage(chatId, 'Enter a valid number for the quantity.');
+                        return;
+                    }
+                    userState[chatId].quantity = parseInt(userInput);
+                    userState[chatId].step = 'askDuration';
+                    bot.sendMessage(chatId, 'What is the duration of vouchers in hours?');
+                    break;
+                case 'askDuration':
+                    if (isNaN(userInput) || parseInt(userInput) <= 0) {
+                        bot.sendMessage(chatId, 'Enter a valid number for the duration.');
+                        return;
+                    }
+                    userState[chatId].duration = parseInt(userInput);
+                    userState[chatId].step = 'askSpeed';
+                    let speedOptions = { reply_markup: { inline_keyboard: [] } };
+                    for (let x = 0; x < cfg.network.speed.mac.length; x++) {
+                        speedOptions.reply_markup.inline_keyboard.push([{
+                            text: cfg.network.speed.mac[x].name,
+                            callback_data: x
+                        }]);
+                    }
+                    console.log(speedOptions)
+                    bot.sendMessage(chatId, 'Select speed profile for vouchers:', speedOptions);
+                    break;
+                case 'askName':
+                    userState[chatId].name = userInput;
+                    userState[chatId].step = 'askMacAddress';
+                    bot.sendMessage(chatId, 'Enter the MAC address:');
+                    break;
+                case 'askMacAddress':
+                    // Validate MAC address (basic validation)
+                    const macRegex = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+                    if (!macRegex.test(userInput)) {
+                        bot.sendMessage(chatId, 'Invalid MAC address. Eenter a valid MAC address.');
+                        return;
+                    }
+                    userState[chatId].macAddress = userInput;
+                    userState[chatId].step = 'askSpeed';
+                    let macSpeedOptions = { reply_markup: { inline_keyboard: [] } };
+                    for (let x = 0; x < cfg.network.speed.mac.length; x++) {
+                        macSpeedOptions.reply_markup.inline_keyboard.push([{
+                            text: cfg.network.speed.mac[x].name,
+                            callback_data: x
+                        }]);
+                    }
+                    bot.sendMessage(chatId, 'Select speed profile for this MAC address:', macSpeedOptions);
+                    break;
+                default:
+                    bot.sendMessage(chatId, 'Unexpected input. Please start over with /vouchers or /add_permanent.');
+                    delete userState[chatId]; // Reset state
+                    break;
+            }
+        });
+        bot.on('callback_query', (callbackQuery) => {
+            const chatId = callbackQuery.message.chat.id;
+            const speed = callbackQuery.data;
+            if (!userState[chatId]) {
+                bot.answerCallbackQuery(callbackQuery.id, { text: 'No active process.' });
+                return;
+            }
+            const currentStep = userState[chatId].step;
+            if (currentStep === 'askSpeed') {
+                bot.answerCallbackQuery(callbackQuery.id, { text: `You selected: ${cfg.network.speed.mac[speed].name}` });
+                if (userState[chatId].macAddress) {
+                    // This is for `/add_permanent`
+                    const { name, macAddress } = userState[chatId];
+                    const selectedSpeed = cfg.network.speed.mac[speed];
+                    console.log("telegram  - adding permanant MAC: " + macAddress);
+                    user[macAddress] = { name, speed, added: time.epoch };
+                    file.write("user");
+                    bot.sendMessage(chatId, `Permanent entry added:\nName: ${name}\nMAC: ${macAddress}\nSpeed: ${selectedSpeed.name}`);
+                } else if (userState[chatId].quantity && userState[chatId].duration) {
+                    // This is for `/vouchers`
+                    const { quantity, duration } = userState[chatId];
+                    let vouchers = script.voucher.generate(10, quantity, duration, speed, false);
+                    let codes = [];
+                    for (let code in vouchers) codes.push(code);
+                    const codelist = codes.join("\n");
+                    console.log(codelist);
+                    bot.sendMessage(chatId, `Generated vouchers:\n${codelist}`);
+                }
+                delete userState[chatId]; // Reset state
+            } else {
+                bot.answerCallbackQuery(callbackQuery.id, { text: 'Unexpected input.' });
+            }
+        });
     },
     dhcp: function () {
         console.log("system    - starting DHCP server...")
@@ -1903,10 +2095,10 @@ server = {
             let param = cfg.network.portal;
             let buf = [
                 'interface=' + cfg.network.interface[0].if,
-                'address=/#/' + param.dnsServer,
-                'port=' + param.dnsServerPort,
+                'address=/#/' + cfg.network.interface[0].ip,
+                'port=' + 52,
             ];
-            //  console.log("DNS Service Config: ", buf);
+            console.log("DNS       - Service (portal) Config: ", buf);
             fs.writeFileSync(path.app + "/tmp/dnsmasq-portal.conf", buf.join("\n"));
         }
     },
@@ -1915,17 +2107,18 @@ sys = {
     boot: function () {
         sys.lib();
         sys.checkArgs();
-        file.read.cfg();
+        file.read("cfg");
         sys.init();
         console.log("system    - booting...");
+        //    send("telegram", "notif", { msg: "nfSense system starting" })
         libLate();
-        file.read.voucher();
-        file.read.user();
-        file.read.stat();
+        file.read("voucher");
+        file.read("guest");
+        file.read("user");
+        file.read("stat_nv");
 
         script.getStatSec();
         script.getStat();
-
 
         server.web();
         script.checkRoutes();
@@ -1936,6 +2129,7 @@ sys = {
         if (cfg.services.dns.enabled) server.dnsBind9();
         if (cfg.network.portal.enabled) server.dnsMasqPortal();
         if (cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.clientConnect();
+        if (cfg.services.telegram.enabled) server.telegram();
 
         app.getConGateways(true);
         if (cfg.network.portal.enabled || cfg.network.speed.mac.length > 0) {
@@ -1944,8 +2138,6 @@ sys = {
         }
         if (cfg.monitor.lan.enable) script.pingLan();
         script.pingWanRound();
-
-
 
         setInterval(() => {
             script.gatewayMonitor();
@@ -1965,11 +2157,6 @@ sys = {
     },
     init: function () {
         services = {};
-        stat_nv = {
-            conntrack: [],
-        };
-        user = {};
-        voucher = {};
         arp = {};
         spawnC = [];
         stat = {
@@ -1998,6 +2185,7 @@ sys = {
             arpTimer: null,
             tableFlushes: 0,
             tableRemovalFail: 0,
+            gatewaySelected: undefined,
             gateways: [],
             nfTables: {
                 timer: null,        // gateway update wait timer
@@ -2011,11 +2199,12 @@ sys = {
                 entriesLast: [],
                 entriesLastPos: 0,
             },
-            file: {
-                timer: {
-                    user: null,
-                    voucher: null,
-                },
+            fileTimer: {
+                cfg: null,
+                stat_nv: null,
+                user: null,
+                guest: null,
+                voucher: null,
             }
         }
         for (let x = 0; x < cfg.network.interface.length; x++) {
@@ -2046,6 +2235,7 @@ sys = {
         os = require('os');
         cp = require('child_process');
         fs = require('fs');
+        udp = require('dgram').createSocket('udp4');
         events = require('events');
         em = new events.EventEmitter();
         path = {
@@ -2139,85 +2329,36 @@ sys = {
             }
         };
         file = {
-            write: {
-                cfg: function () {
-                    clearTimeout(state.file.timer.cfg);
-                    state.file.timer.cfg = setTimeout(() => {
-                        console.log("system    - saving config data to: " + path.app + 'nfsense-config.tmp');
-                        fs.writeFile(path.app + 'nfsense-config.tmp', JSON.stringify(config, null, 2), 'utf-8', (e) => {
-                            cp.exec("cp " + path.app + 'nfsense-config.tmp ' + path.app + 'nfsense-config.json', () => { });
-                        })
-                    }, 5e3);
-                },
-                user: function () {
-                    clearTimeout(state.file.timer.user);
-                    state.file.timer.user = setTimeout(() => {
-                        console.log("system    - saving user data to: " + path.app + 'nfsense-user.tmp');
-                        fs.writeFile(path.app + 'nfsense-user.tmp', JSON.stringify(user, null, 2), 'utf-8', (e) => {
-                            cp.exec("cp " + path.app + 'nfsense-user.tmp ' + path.app + 'nfsense-user.json', () => { });
-                        })
-                    }, 5e3);
-                },
-                voucher: function () {
-                    clearTimeout(state.file.timer.voucher);
-                    state.file.timer.voucher = setTimeout(() => {
-                        console.log("system    - saving voucher data to: " + path.app + 'nfsense-voucher.tmp');
-                        fs.writeFile(path.app + 'nfsense-voucher.tmp', JSON.stringify(voucher, null, 2), 'utf-8', (e) => {
-                            cp.exec("cp " + path.app + 'nfsense-voucher.tmp ' + path.app + 'nfsense-voucher.json', () => { });
-                        })
-                    }, 3e3);
-                },
-                stat: function () {
-                    //    console.log("system    - saving stat data to: " + path.app + 'nfsense-stat.tmp');
-                    fs.writeFile(path.app + 'nfsense-stat.tmp', JSON.stringify(stat_nv, null, 2), 'utf-8', (e) => {
-                        cp.exec("cp " + path.app + 'nfsense-stat.tmp ' + path.app + 'nfsense-stat.json', () => { });
+            write: function (file) {
+                clearTimeout(state.fileTimer[file]);
+                state.fileTimer[file] = setTimeout(() => {
+                    if (file != "stat_nv") console.log("system    - saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
+                    fs.writeFile(path.app + "nfsense-" + file + ".tmp", JSON.stringify(global[file], null, 2), 'utf-8', (e) => {
+                        cp.exec("cp " + path.app + "nfsense-" + file + ".tmp " + path.app + "nfsense-" + file + ".json", () => { });
                     })
-                }
+                }, 5e3);
             },
-            read: {
-                cfg: function () {
-                    try {
-                        console.log("system    - loading config data");
-                        cfg = JSON.parse(fs.readFileSync(path.app + "nfsense-config.json", 'utf8'));
-                    } catch (e) {
-                        console.log(e)
-                        console.log("cfg file does not exist, exiting");
-                        process.exit();
-                    }
-                },
-                user: function () {
-                    try {
-                        console.log("system    - loading user data");
-                        user = JSON.parse(fs.readFileSync(path.app + "nfsense-user.json", 'utf8'));
-                        //   console.log(user);
-                    } catch {
-                        console.log("system    - user file does not exist, creating");
-                        fs.writeFileSync(path.app + "nfsense-user.json", JSON.stringify(user));
-                    }
-                },
-                voucher: function () {
-                    try {
-                        console.log("system    - loading voucher data");
-                        voucher = JSON.parse(fs.readFileSync(path.app + "nfsense-voucher.json", 'utf8'));
-                        //   console.log(voucher);
-                    } catch {
-                        console.log("system    - voucher file does not exist, creating");
-                        fs.writeFileSync(path.app + "nfsense-voucher.json", JSON.stringify(voucher));
-                    }
-                },
-                stat: function () {
-                    try {
-                        console.log("system    - loading stat data");
-                        stat_nv = JSON.parse(fs.readFileSync(path.app + "nfsense-stat.json", 'utf8'));
-                        //   console.log(stat);
-                    } catch {
-                        console.log("system    - stat file does not exist, creating");
-                        fs.writeFileSync(path.app + "nfsense-stat.json", JSON.stringify(stat_nv));
-                    }
-                },
+            read: function (file) {
+                try {
+                    console.log("system    - loading " + file + " data");
+                    global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
+                } catch (e) {
+                    // console.log(e)
+                    console.log("system    - file read error - " + file + " file does not exist, creating");
+                    // cp.execSync("touch " + path.app + "nfsense-" + file + ".json")
+                    fs.writeFileSync(path.app + "nfsense-" + file + ".json", "{ }", "utf8");
+                    global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
+
+                    //process.exit();
+                }
             }
         };
         libLate = function () {
+            if (cfg.services.telegram.enabled) {
+                console.log('telegram  - service started');
+                TelegramBot = require('node-telegram-bot-api');
+                bot = new TelegramBot(cfg.services.telegram.token, { polling: true });
+            }
             si = require('systeminformation');
             http = require('http');
             https = require('https');
@@ -2263,6 +2404,11 @@ sys = {
             eWebAdmin.listen(82, () => console.log('webserver - HTTP admin web server running on port 82'));
             eWebSecure.listen(443, () => console.log('webserver - HTTPS admin web server running on port 443'));
         };
+        send = function (type, typeClass, obj) {
+            udp.send(JSON.stringify({ type: type, class: typeClass, obj: obj }), 31, '10.21.88.2', function (error) {
+                if (error) { console.log(error) }
+            });
+        }
         time.startTime();
     },
     checkArgs: function () {
@@ -2349,9 +2495,6 @@ sys = {
             cp.execSync("nft -f /etc/nftables.conf");
             process.exit();
         }
-
-
-
     },
 }
 sys.boot();
