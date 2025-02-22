@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Captive Portal</title>
+  <title>USFW Portal</title>
   <style>
     body {
       margin: 0;
@@ -94,9 +94,11 @@
       color: white;
       cursor: pointer;
     }
+
     buttonFree:hover {
       background: #0059b3;
     }
+
     button:hover {
       background: #0059b3;
     }
@@ -134,12 +136,12 @@
   <div class="container">
     <img src="logo.png" alt="Portal Logo" class="logo">
 
-    <div class="welcome">Welcome to the GWIS Portal! Enjoy secure internet access.</div>
+    <div class="welcome">Welcome to the USFW Portal!</div>
 
     <ul class="rules">
-      <li>Usage limited to registered users only.</li>
+      <li>Usage is limited for free users.</li>
       <li>Contact support for any issues.</li>
-      <li>Rates: 20p/day, 100p/week.</li>
+      <li>Ask about unlimited access</li>
     </ul>
 
     <div class="field">
@@ -212,16 +214,17 @@
           },
           body: JSON.stringify({ request: 'free_internet' })
         });
-
-        if (response.status === 200) {
-          const result = await response.json();
+        const result = await response.json();
+        if (response.result && response.result.success&&response.result.success === "lockout") {
+          statusDiv.textContent = 'you are still locked out, try back later';
+          statusDiv.style.color = 'red';
+        } else if (response.status === 200) {
           statusDiv.textContent = 'Free internet granted! Redirecting...';
           statusDiv.style.color = 'green';
           window.location.href = result.redirectUrl;
           setTimeout(() => {
             window.location.href = result.redirectUrl;
           }, 2000);
-          
         } else {
           statusDiv.textContent = 'Unexpected response from the server.';
           statusDiv.style.color = 'red';
