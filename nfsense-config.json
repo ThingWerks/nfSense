@@ -103,7 +103,7 @@
         },
         "telegram": {
             "enabled": true,
-            "token": "7707253773:AAFMHQzP2g7zozft1J_uU3wegSnMUVwcHK8",
+            "token": "-------:-----",
             "admins": [
                 99999999
             ]
