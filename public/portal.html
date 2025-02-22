@@ -189,35 +189,6 @@
       }
     });
 
-    freeInternetBtn.addEventListener('click', async () => {
-      try {
-        const response = await fetch('/free-internet', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ request: 'free_internet' })
-        });
-
-        if (response.status === 200) {
-          const result = await response.json();
-          statusDiv.textContent = 'Free internet granted! Redirecting...';
-          statusDiv.style.color = 'green';
-          window.location.href = result.redirectUrl;
-          setTimeout(() => {
-            window.location.href = result.redirectUrl;
-          }, 2000);
-          
-        } else {
-          statusDiv.textContent = 'Unexpected response from the server.';
-          statusDiv.style.color = 'red';
-        }
-      } catch (error) {
-        statusDiv.textContent = 'Error processing request. Try again later.';
-        statusDiv.style.color = 'red';
-      }
-    });
-
     helpBtn.addEventListener('click', () => {
       helpContainer.style.display = helpContainer.style.display === 'block' ? 'none' : 'block';
     });
