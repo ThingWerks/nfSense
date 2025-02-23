@@ -1,7 +1,9 @@
 script = {
     setup: function () {
-        console.log("updating package list...");
+        console.log("setting permissions");
+        cp.execSync("chmod 770 " + path.app + " -R");
 
+        console.log("updating package list...");
         try { cp.execSync("apt-get update"); } catch (e) { }
 
         console.log("installing system network packages...");
@@ -43,7 +45,7 @@ script = {
         console.log("disabling SystemD ISC-DHCP-Server");
         cp.execSync("systemctl stop isc-dhcp-server.service");
         cp.execSync("systemctl disable isc-dhcp-server.service");
-        cp.execSync("mkdir " + path.app + "/tmp");
+        try { cp.execSync("mkdir " + path.app + "/tmp"); } catch { }
 
         console.log("\n\nrouter setup done!!\n");
         process.exit();
@@ -118,7 +120,7 @@ script = {
                         || gateway.status.includes("offline")) {
                         if (gateway.status == "online") gateway.offline = false;
                         clearTimeout(state.nfTables.timer);
-                        state.nfTables.timer = setTimeout(() => { script.nft(); }, 3e3);
+                        state.nfTables.timer = setTimeout(() => { script.mangle(); }, 3e3);
                     }
                     gateway.statusPrevious = gateway.status;
                 }
@@ -178,7 +180,7 @@ script = {
             }
         }
     },
-    nft: function () {
+    mangle: function () {
         let sequence = [], sequenceAll = [], set = [], numgen = [];
         for (let x = 0; x < state.gateways.length; x++) {
             //   console.log(state.gateways[x].status)
@@ -230,45 +232,40 @@ script = {
             case "failover":
                 for (let x = 0; x < state.gateways.length; x++) {
                     let gateway = state.gateways[x];
-                    console.log(gateway.status);
-                    if (state.gatewaySelected != x) {
-                        if (gateway.status == undefined || gateway.status.includes("online")) {
-                            console.log("gateway   - failover - selecting gateway " + cfg.gateways[x].name);
-                            let interface = gateway.interface || cfg.network.interface[1] ? cfg.network.interface[1].if : cfg.network.interface[0].if;
-                            if (cfg.services.portal.enabled) {
-                                nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "'
-                                    + interface + '" masquerade');
-                            } else {
-                                nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
-                                    + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
-                            }
-                            cp.exec("ip route delete default", (e) => {
-                                // console.log(e);
-                                cp.exec("ip route add default via " + cfg.gateways[x].ip, (e) => { if (e) console.log(e) });
-                            });
-                            gatewaySelected = x;
-                            break;
+                    if (state.gatewaySelected == undefined) {
+                        if (gateway.status === undefined || gateway.status.includes("online")) { switchGateway(gateway, x); break; }
+                    } else if (state.gatewaySelected !== x) {
+                        if (state.gateways[state.gatewaySelected].offline == true) {
+                            switchGateway(gateway, x); break;
+                        } else if (x < state.gatewaySelected && gateway.status.includes("online")) {
+                            switchGateway(gateway, x); break;
                         }
                     }
+                }
+                function switchGateway(gateway, x) {
+                    console.log("gateway   - failover - selecting gateway " + cfg.gateways[x].name);
+                    let interface = gateway.interface || cfg.network.interface[1]
+                        ? cfg.network.interface[1].if : cfg.network.interface[0].if;
+                    if (cfg.gateways[x].allowedIPs != undefined && cfg.gateways[x].allowedIPs.length > 0) {
+                        console.log("gateway   - failover - applying NAT restricted access");
+                        nft.update('nat postrouting', 'masquerade', 'ip saddr {' + cfg.gateways[x].allowedIPs
+                            + '} oif "' + interface + '" masquerade');
+                    } else if (cfg.services.portal.enabled) {
+                        nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "' + interface + '" masquerade');
+                    } else {
+                        nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
+                            + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
+                    }
+                    cp.execSync("ip route delete default");
+                    cp.execSync("ip route add default via " + cfg.gateways[x].ip);
+                    if (cfg.vpn.wireguard.client && cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.clientConnect();
+                    state.gatewaySelected = x;
                 }
                 break;
         }
         function nftWrite() {
-            let buf = [];
-            // app.nft.tables.mangle[1].rule.expr[0].match.right.set[0].prefix.addr = cfg.network.interface[0].subnetCIDR[0];
-            // app.nft.tables.mangle[1].rule.expr[0].match.right.set[0].prefix.len = cfg.network.interface[0].subnetCIDR[1];
-            app.nft.tables.mangle[3].rule.expr[2].mangle.value.map.key.numgen = numgen;
-            app.nft.tables.mangle[3].rule.expr[2].mangle.value.map.data.set = set;
-
-            if (cfg.vpn.wireguard.client)
-                for (let x = 0; x < cfg.vpn.wireguard.client.length; x++) {
-                    let networks = parseIPSubnets(cfg.vpn.wireguard.client[x].networks);
-                    //   console.log("nftables  - excluding VPN  networks from mangle rules...");
-                    //    console.log(networks)
-                    for (let y = 0; y < networks.length; y++) {
-                        app.nft.tables.mangle[1].rule.expr[0].match.right.set.push({ prefix: { addr: networks[y].ip, len: networks[y].subnet } })
-                    }
-                }
+            app.nft.tables.mangle[2].rule.expr[2].mangle.value.map.key.numgen = numgen;
+            app.nft.tables.mangle[2].rule.expr[2].mangle.value.map.data.set = set;
             function parseIPSubnets(input) {
                 const pairs = input.split(", ").map(pair => pair.trim());
                 return pairs.map(pair => {
@@ -276,13 +273,12 @@ script = {
                     return { ip, subnet: parseInt(subnet, 10) };
                 });
             }
-            //    console.log(app.nft.tables.mangle[1].rule.expr[2].mangle.value.map.data)
             if (state.nfTables.mangle == undefined) {
                 nftCreateTable();
             } else {
-                app.nft.tables.mangle[3].rule.handle = state.nfTables.mangle;
-                console.log("nftables  - updating mangle table...");
-                let command = "printf '" + JSON.stringify({ nftables: [{ replace: app.nft.tables.mangle[3] }] }) + "' | nft -j -f -"
+                app.nft.tables.mangle[2].rule.handle = state.nfTables.mangle;
+                console.log("nftables  - updating mangle table - ", set);
+                let command = "printf '" + JSON.stringify({ nftables: [{ replace: app.nft.tables.mangle[2] }] }) + "' | nft -j -f -"
                 cp.exec(command, (e) => {
                     if (e) {
                         console.log("!!!!!!mangle table doesnt exist anymore, nftables must have been flushed!!!!!!")
@@ -293,33 +289,19 @@ script = {
                 })
             }
             function nftCreateTable() {
-                console.log("nftables  - mangle rules dont exist");
-                let mangleNum;
-                app.nft.tables.mangle.forEach((e) => { buf.push({ add: e }) });
-                let command = "nft delete chain ip mangle prerouting ; printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -"
-                console.log("nftables  - creating mangle rules...")
-
-                cp.exec(command, (e) => {
-                    if (e) {
-                        console.log("nftables  - error - mangle table missing or command failed - recreating");
-                        app.nft.create(false);
-                        cp.exec('nft delete chain ip mangle prerouting ; ' + command, (e) => {
-                            if (e) console.error(e);
-                            if (cfg.services.portal.enabled) {
-                                console.log("nftables  - adding portal disallow rule");
-                                cp.exec("nft insert rule mangle prerouting ip saddr != @allow return");
-                            }
-                        })
-                    } else {
-                        if (cfg.services.portal.enabled) {
-                            console.log("nftables  - adding portal disallow rule");
-                            cp.exec("nft insert rule mangle prerouting ip saddr != @allow return");
-                        }
-                    }
-                    mangleNum = parse(cp.execSync('nft -a list chain ip mangle prerouting').toString(), 'nfsense_mangle" # handle ', '\n')
-                    console.log("nftables  - mangle table rule handle is: " + Number(mangleNum));
-                    state.nfTables.mangle = Number(mangleNum);
-                });
+                console.log("nftables  - creating mangle ruleset");
+                cp.execSync('nft flush chain ip mangle prerouting');
+                let mangleNum, rbuf = [];
+                app.nft.tables.mangle.forEach((e) => { rbuf.push({ add: e }) });
+                let command = "printf '" + JSON.stringify({ nftables: rbuf }) + "' | nft -j -f -"
+                cp.execSync(command);
+                if (cfg.services.portal.enabled) {
+                    console.log("nftables  - adding portal disallow rule");
+                    cp.execSync("nft insert rule mangle prerouting ip saddr != @allow return");
+                }
+                mangleNum = parse(cp.execSync('nft -a list chain ip mangle prerouting').toString(), 'nfsense_mangle" # handle ', '\n')
+                console.log("nftables  - mangle table rule handle is: " + Number(mangleNum));
+                state.nfTables.mangle = Number(mangleNum);
             }
         }
     },
@@ -577,11 +559,21 @@ app = {
             nft.update("filter forward", "wireguard_allow_out", ' oifname "wg*" accept');
 
             if (flush !== false) {
+                arp = {};
                 console.log("nftables  - flushing all speed limiter tables");
                 cfg.network.speed.mac.forEach(element => { nft.flush("filter", element.name); });
             }
 
-            nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept");
+            console.log("nftables  - flushing mangle chain");
+            try { cp.execSync('nft flush chain ip mangle prerouting'); }
+            catch {
+                try { nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept"); }
+                catch {
+                    cp.execSync('nft flush table ip mangle');
+                    nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept");
+                }
+            }
+            state.nfTables.mangle = undefined;
 
             if (cfg.network.speed.mac[1] != undefined || cfg.network.speed.ip.length > 0) {
                 nft.delete("filter forward", "speed_unrestricted");
@@ -609,7 +601,8 @@ app = {
                 if (flush !== false) {
                     nft.flush("nat", "allow");
                     nft.flush("mangle", "allow");
-                    cp.execSync('nft flush chain ip nat prerouting');
+                    try { cp.execSync('nft flush chain ip nat prerouting'); }
+                    catch { createNat(); }
                     cp.execSync('nft flush chain ip nat postrouting');
                 }
                 nft.update("nat prerouting", "nat_portal_redirect_dns", 'ip saddr != @allow udp dport 53 dnat to '
@@ -622,33 +615,25 @@ app = {
                     + ((cfg.network.interface[1]) ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
             } else {
                 console.log("nftables  - creating outbound nat");
-                cp.execSync('nft flush chain ip nat prerouting');
+                try { cp.execSync('nft flush chain ip nat prerouting'); } catch { createNat(); }
                 nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
                     + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + ((cfg.network.interface[1])
                         ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
             }
+            function createNat() {
+                cp.execSync('nft add table ip nat');
+                cp.execSync('nft add chain ip nat prerouting "{ type nat hook prerouting priority filter; policy accept; }"');
+                cp.execSync('nft add chain ip nat postrouting "{ type nat hook postrouting priority srcnat; policy accept; }"');
+            }
+            if (cfg.network.gateway.startAll) script.mangle();
         },
         tables: {
             mangle: [
-                {
-                    chain: {
-                        family: "ip",
-                        table: "mangle",
-                        name: "prerouting",
-                        handle: 1,
-                        type: "filter",
-                        hook: "prerouting",
-                        prio: -100,
-                        policy: "accept"
-                    },
-
-                },
                 {
                     rule: {
                         family: "ip",
                         table: "mangle",
                         chain: "prerouting",
-                        handle: 3,
                         expr: [
                             {
                                 match: {
@@ -694,7 +679,6 @@ app = {
                         family: "ip",
                         table: "mangle",
                         chain: "prerouting",
-                        handle: 4,
                         expr: [
                             {
                                 match: {
@@ -720,7 +704,6 @@ app = {
                         table: "mangle",
                         chain: "prerouting",
                         comment: "nfsense_mangle",
-                        handle: 6,
                         expr: [
                             {
                                 match: {
@@ -781,7 +764,6 @@ app = {
                         family: "ip",
                         table: "mangle",
                         chain: "prerouting",
-                        handle: 7,
                         expr: [
                             {
                                 match: {
@@ -836,7 +818,6 @@ app = {
                         family: "ip",
                         table: "mangle",
                         chain: "prerouting",
-                        handle: 8,
                         expr: [
                             {
                                 mangle: {
@@ -855,21 +836,7 @@ app = {
                         ]
                     }
                 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-            ],
-            speed: [],
+            ]
         },
         command: {
             cTable: function (table, chain, type, priority, policy) {
@@ -925,6 +892,7 @@ app = {
                 return Number(handleNum);
             },
             speedMAC: function () {
+                timeout = 0;
                 let buf = [     // unrestricted class rules
                     {
                         add:
@@ -1150,7 +1118,11 @@ app = {
                         })
                     }
                 }
-                cp.execSync("printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -");
+                setTimeout(() => {
+                    cp.execSync("printf '" + JSON.stringify({ nftables: buf }) + "' | nft -j -f -");
+                    timeout + 500;
+                }, timeout);
+
             },
             speedIP: function () {
                 let buf = [];   // unrestricted class rules
@@ -1357,11 +1329,26 @@ app = {
                         "PersistentKeepalive = " + connection.keepalive,
                     ]
                     fs.writeFileSync(fileName, buf.join("\n"));
-                    cp.exec("wg-quick down wg" + x + "; wg-quick up " + fileName, (e, d) => {
-                        if (e) console.log("\nWireguard - " + connection.name + " - error: ", e);
-                        else console.log("\nWireguard - " + connection.name + " - successfully connected: ", d);
-                        cp.exec("wg show", (e, d) => { console.log(e || "", d) })
-                    });
+                    cp.execSync
+                    try {
+                        console.log("\nWireguard - " + connection.name + " - shutting down");
+                        console.log(cp.execSync("wg-quick down wg" + x).toString());
+                        start();
+                    }
+                    catch (e) {
+                        try { cp.execSync("wg-quick down wg" + x).toString(); start() } catch { start(); }
+                        // console.log("\nWireguard - " + connection.name + " - shutdown error: ", e.toString());
+                    }
+                    function start() {
+                        setTimeout(() => {
+                            try {
+                                console.log("\nWireguard - " + connection.name + " - successfully connected: "
+                                    , cp.execSync("wg-quick up " + fileName).toString());
+                                console.log(cp.execSync("wg show").toString());
+                            }
+                            catch (e) { console.log("\nWireguard - " + connection.name + " - connection error: ", e.toString()) }
+                        }, 500);
+                    }
                 }
             }
         }
@@ -1561,7 +1548,7 @@ app = {
                         if (e.message.includes("Command failed:  nft add element ip")) {
                             console.log("ARP       - flushing NF and ARP tables");
                             app.nft.create(true);
-                            script.nft();
+                            script.mangle();
                             state.tableFlushes++;
                             arp = {};
                         } else {
@@ -1969,6 +1956,7 @@ server = {
                     user[macAddress] = { name, speed, added: time.epoch };
                     file.write("user");
                     bot.sendMessage(chatId, `Permanent entry added:\nName: ${name}\nMAC: ${macAddress}\nSpeed: ${selectedSpeed.name}`);
+                    app.nft.create();
                 } else if (userState[chatId].quantity && userState[chatId].duration) {
                     // This is for `/vouchers`
                     const { quantity, duration } = userState[chatId];
@@ -1988,15 +1976,21 @@ server = {
     dhcp: function () {
         console.log("system    - starting DHCP server...")
         let buffer = '';
+        let bufLog = [], logNum = 0;
         service();
         services.dhcp = cp.spawn('dhcpd', ['-4', '-f', '-cf', '/etc/dhcp/dhcpd.conf']);
-        services.dhcp.stdout.on('data', (chunk) => {  /* console.log("NORMAL DADAT: " + data) */ });
+        services.dhcp.stdout.on('data', (chunk) => {
+            //////////  console.log("NORMAL DADAT: " + data)
+        });
         services.dhcp.stderr.on('data', (chunk) => {
-            //  console.log(chunk.toString())
+            bufLog[logNum] = chunk.toString();
+            if (logNum < 499) logNum++;
+            else logNum = 0;
             /* process(chunk);*/
         });
         services.dhcp.on('close', (code) => {
             console.log("system    - dhcpd exited with code: " + code + ", restarting...");
+            console.log(bufLog);
             setTimeout(() => { server.dhcp(); }, 3e3);
             cp.exec("killall -9 dhcpd");
             if (buffer.length > 0) console.log('system    - Final incomplete line:', buffer);
@@ -2230,8 +2224,8 @@ server = {
 sys = {
     boot: function () {
         sys.lib();
-        sys.checkArgs();
         file.read("cfg"); // config data must be read before init
+        sys.checkArgs();
         sys.init();
         console.log("system    - booting...");
         //    send("telegram", "notif", { msg: "nfSense system starting" })
@@ -2246,7 +2240,7 @@ sys = {
         server.web();
         script.checkRoutes();
         app.nft.create();
-        if (cfg.network.gateway.startAll) script.nft();
+        //  if (cfg.network.gateway.startAll) script.mangle();
         if (cfg.services.dhcp.enabled) { server.dhcp(); app.getDHCP(); }
         if (cfg.services.dns.enabled) server.dnsBind9();
         if (cfg.services.portal.enabled) server.dnsBind9Portal();
@@ -2265,6 +2259,14 @@ sys = {
             script.gatewayMonitor();
             app.systemInfo();
             script.getStatSec();
+            fs.stat('/etc/nftables.conf', (err, stats) => {
+                if (state.nfTables.modify == undefined) state.nfTables.modify = stats.mtimeMs;
+                else if (state.nfTables.modify != stats.mtimeMs) {
+                    console.log("nftables  - rules have been modified - recreating tables...");
+                    state.nfTables.modify = stats.mtimeMs;
+                    setTimeout(() => { app.nft.create(); }, 5e3);
+                }
+            });
         }, 1e3);
         setInterval(() => {
             app.getConnTotal();
@@ -2313,6 +2315,7 @@ sys = {
             nfTables: {
                 timer: null,        // gateway update wait timer
                 mangle: undefined,  // mangle rule handle number
+                modify: undefined,  // track modify times
             },
             conntrack: {
                 totalMin: [],
@@ -2455,7 +2458,7 @@ sys = {
             write: function (file) {
                 clearTimeout(state.fileTimer[file]);
                 state.fileTimer[file] = setTimeout(() => {
-                    if (file != "stat_nv"&& file != "guest") console.log("system    - saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
+                    if (file != "stat_nv" && file != "guest") console.log("system    - saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
                     fs.writeFile(path.app + "nfsense-" + file + ".tmp", JSON.stringify(global[file], null, 2), 'utf-8', (e) => {
                         cp.exec("cp " + path.app + "nfsense-" + file + ".tmp " + path.app + "nfsense-" + file + ".json", () => { });
                     })
