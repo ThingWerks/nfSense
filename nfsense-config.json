@@ -220,8 +220,6 @@
             "name": "Jesmark",
             "ip": "172.16.10.1",
             "weight": 10,
-            "comment": [],
-            "uncomment": []
         },
         {
             "name": "Cartegena",
@@ -229,29 +227,13 @@
             "weight": 10
         },
         {
-            "name": "Dan",
-            "ip": "172.16.10.4",
-            "weight": 10
-        },
-        {
-            "name": "Hablato",
-            "ip": "172.16.10.5",
-            "weight": 10
-        },
-        {
-            "name": "Randall",
-            "ip": "172.16.10.6",
-            "weight": 10
-        },
-        {
-            "name": "Tim",
-            "ip": "172.16.10.7",
-            "weight": 10
-        },
-        {
-            "name": "Sandy",
-            "ip": "172.16.10.10",
-            "weight": 10
+            "name": "Globe",
+            "ip": "172.16.11.2",
+            "interface": "enxc8a362594018",
+            "allowedIPs": [
+                "10.21.55.13",
+                "10.21.55.10"
+            ]
         }
     ],
     "monitor": {
