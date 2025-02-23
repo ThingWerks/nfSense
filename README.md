@@ -4,36 +4,36 @@
 ### What is It:
   - this is a web based internet firewall solution like pfSense but for Linux
   - its still an early development
-  - it is designed for public access wifi, schools, or environments with heavy captive portal, speed control and bandwitch requirements.
+  - it is designed for public access wifi, schools, or environments with heavy captive portal, speed control and bandwidth requirements.
   - internet speed can be heavily restricted but still provide a quality user experience because of busrt speed
   - highly advanced fair use policies 
-  - great for Starlink and aggrigated modem/router setups, WISPs 
+  - great for Starlink and aggregated modem/router setups, WISPs 
 
 ### Features:
   - based on nfTables, ISC DHCP, Bind9 and WireGuard
   - built for Debian 12 and NodeJS 22
   - MAC based speed limiting, speed bursting
-  - MAC based netwrok access control
+  - MAC based network access control
   - captive portal, voucher generator and public access time limiting
-  - smart load balancing, weighted aggrigation and intellegent failover
+  - smart load balancing, weighted aggregation and intelligent failover
   - web based traffic, network performance and connection monitoring
   - quorum based gateway monitoring
-  - efortless setup, no complex installation steps, just a simple config file
+  - effortless setup, no complex installation steps, just a simple config file
   - connection stats, like active DHCP, ARP and portal users, sockets per gateway and per gateway performance monitoring
-  - VPN concentration and hairpinning
+  - VPN concentration and hair-pinning
 
 ### Captive Portal Features:
   - per voucher speed control
-  - generate vouchers as needed usint Telegram bot
-  - can set voucher code length, duration, speed and allowed logins
-  - can add permanant portal passthrough via telegram
+  - generate vouchers as needed using Telegram bot
+  - can set voucher code length, duration, speed and concurrent logins
+  - can add permanent portal passthrough via telegram
   - quickly get mac address and IP via portal secret code
-  - portal feature help request submisstion via Telegram bot
+  - portal feature help request submission via Telegram bot
 
 ### Unique Capabilities:
   - have multiple redundant gateways all on one (or more) interface
   - router on a stick (single interface routing)
-  - have mutilple network speed profiles based on MAC or IP address
+  - have multiple network speed profiles based on MAC or IP address
   - good performance with Realtek network interfaces (unlike pfsense)
   - have a single onsite device acting as both server and router with the need for a VM; saves energy and hardware costs
 
