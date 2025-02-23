@@ -5,7 +5,7 @@
   - this is a web based internet firewall solution like pfSense but for Linux
   - its still an early development
   - it is designed for public access wifi, schools, or environments with heavy captive portal, speed control and bandwitch requirements.
-  - it can heavily restrict internet speed but still produce a quality user experience do to burst speed modes
+  - internet speed can be heavily restricted but still provide a quality user experience because of busrt speed
   - highly advanced fair use policies 
   - great for Starlink and aggrigated modem/router setups, WISPs 
 
