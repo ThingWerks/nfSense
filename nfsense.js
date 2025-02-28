@@ -256,8 +256,8 @@ script = {
                         nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
                             + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
                     }
-                    cp.execSync("ip route delete default");
-                    cp.execSync("ip route add default via " + cfg.gateways[x].ip);
+                    try { cp.execSync("ip route delete default"); } catch { }
+                    try { cp.execSync("ip route add default via " + cfg.gateways[x].ip); } catch { }
                     if (cfg.vpn.wireguard.client && cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.clientConnect();
                     state.gatewaySelected = x;
                 }
@@ -1646,14 +1646,37 @@ server = {
             res.sendFile(require('path').join(__dirname, "/monitor/monitor.html"));
         });
         webPublic.get('/data', (req, res) => {
-            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+
+            res.json(Array.from({ length: stat_nv.conntrack.length }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
         });
         webAdmin.get('/admin', (req, res) => {
             res.sendFile(require('path').join(__dirname, '/public/index.html'));
         });
         webAdmin.get('/data', (req, res) => {
-            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+            const totalBlocks = 144; // 144 ten-minute blocks in a day
+            const startIdx = time.min10; // Current 10-min block index
+
+            // Create an array of { x, y } where x represents the original 10-min block index
+            let rawData = Array.from({ length: totalBlocks }, (_, i) => ({
+                x: i,
+                y: stat_nv.conntrack[i]
+            }));
+
+            // Rearrange the dataset starting from the current 10-minute block
+            let sortedData = rawData.slice(startIdx).concat(rawData.slice(0, startIdx));
+
+            // Generate hour labels (e.g., "00:00", "01:00", etc.) at the correct positions
+            let labels = sortedData.map((d, i) => {
+                let minutesSinceMidnight = ((startIdx + i) % totalBlocks) * 10;
+                let hour = Math.floor(minutesSinceMidnight / 60);
+                let minute = minutesSinceMidnight % 60;
+
+                return (minute === 0) ? `${hour.toString().padStart(2, '0')}:00` : ''; // Label only on full hours
+            });
+
+            res.json({ data: sortedData, labels: labels });
         });
+
         webAdmin.get('/logout', (req, res) => {
             client = req.ip || req.connection.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
@@ -1756,7 +1779,7 @@ server = {
             });
         });
         web.get('/data', (req, res) => {
-            res.json(Array.from({ length: 288 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
+            res.json(Array.from({ length: 144 }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
         });
         web.get('/test', (req, res) => {
             res.sendFile(require('path').join(__dirname, "/public/data.html"));
@@ -2386,9 +2409,9 @@ sys = {
                 let date = new Date();
                 this.epoch = Math.floor(Date.now() / 1000);
                 this.epochMin = Math.floor(Date.now() / 1000 / 60);
-                this.month = date.getMonth() + 1;   // 0 based
-                this.day = date.getDate();          // not 0 based
-                this.dow = date.getDay() + 1;       // 0 based
+                this.month = date.getMonth() + 1;               // 0 based
+                this.day = date.getDate();                      // not 0 based
+                this.dow = date.getDay() + 1;                   // 0 based
                 this.hour = date.getHours();
                 this.min = date.getMinutes();
                 this.minDay = this.hour * 60 + this.min;
@@ -2526,7 +2549,7 @@ sys = {
             eWebSecure = https.createServer(sslOptions, webSecure); // HTTPS server (port 443)
             swss = new WebSocket.Server({ server: eWebAdmin });   // WSS on HTTPS (port 443)
             eWeb.listen(81, () => console.log('webserver - Redirect server running on port 80'));
-            eWebPublic.listen(83, () => console.log('webserver - Redirect server running on port 80'));
+            eWebPublic.listen(83, () => console.log('webserver - public server running on port 83'));
             eWebAdmin.listen(82, () => console.log('webserver - HTTP admin web server running on port 82'));
             eWebSecure.listen(443, () => console.log('webserver - HTTPS admin web server running on port 443'));
         };
