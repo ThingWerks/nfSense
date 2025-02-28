@@ -1,0 +1,116 @@
+
+
+    body {
+        background-color: #222;
+        color: var(--font-color);
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 0px;
+    }
+
+    canvas {
+        width: 45% !important;
+        height: 250px !important;
+    }
+
+    .chart-container {
+        display: flex;
+        justify-content: space-around;
+    }
+
+    .container {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .dash-title {
+        font-size: 26px;
+        font-weight: bold;
+        color: rgb(37, 140, 209);
+        margin-bottom: 10px;
+    }
+
+    .dash-title-small {
+        font-size: 16px;
+        font-weight: bold;
+        color: rgb(216, 145, 39);
+        margin-right:0px;
+        margin-top: 10px;
+        margin-bottom: 13px;
+    }
+
+    .dash-stats {
+        display: flex;
+        font-size: 22px;
+        font-weight: normal;
+        color: rgb(226, 236, 238);
+        width: 100%;
+        justify-content: space-around;
+    }
+
+    .dash-stats-groups {
+        display: flex;
+        padding: 05px;
+        border-radius: 8px;
+        background-color: #333
+    }
+
+    .title4 {
+        display: flex;
+        gap: 2px;
+        width: 100%;
+    }
+
+    .item-gateways-name {
+        text-align: right;
+        min-width: 200px;
+    }
+    .item-gateways-data {
+        text-align: right;
+        min-width: 60px;
+    }
+    .item-stats {
+        text-align: right;
+
+    }
+
+    .item-stats-data {
+        text-align: right;
+        min-width: 90px;
+    }
+
+
+
+    .on {
+        color: limegreen;
+    }
+
+    .off {
+        color: red;
+    }
+
+    .lag {
+        color: rgb(241, 134, 12);
+    }
+
+
+
+
+    .logout-button {
+        background-color: #ff4d4d;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: bold;
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+        transition: background-color 0.3s ease;
+    }
+    
+    .logout-button:hover {
+        background-color: #ff1a1a;
+    }
