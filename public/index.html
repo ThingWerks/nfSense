@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nfSense</title>
+    <link rel="icon" type="image/x-icon" href="/nftables.jpg">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+    <link rel="stylesheet" href="style.css">
+    <button id="logout-btn" class="logout-button">Logout</button>
+</head>
+
+<body>
+    <div class="container">
+        <div class="chart-container">
+            <canvas id="staticChart"></canvas>
+            <canvas id="liveChart"></canvas>
+        </div>
+
+        <div class="dash-stats">
+
+            <div class="dash-stats-groups">
+                <div>
+                    <div class="dash-title">Gateways</div>
+                    <div id="router-status" class="item-gateways-name"></div>
+                </div>
+                <div>
+                    <div class="dash-title-small">&nbsp&nbsp&nbspPing</div>
+                    <div id="router-ping" class="item-gateways-data"></div>
+                </div>
+                <div>
+                    <div class="dash-title-small">&nbsp&nbsp&nbspSockets</div>
+                    <div id="router-sockets" class="item-gateways-data"></div>
+                </div>
+                <div>
+                    <div class="dash-title-small">&nbsp&nbsp&nbspDrops</div>
+                    <div id="router-drops" class="item-gateways-data"></div>
+                </div>
+            </div>
+
+            <div class="dash-stats-groups">
+                <div>
+                    <div class="dash-title">Stats</div>
+                    <div id="stat-label" class="item-stats"></div>
+                </div>
+                <div>
+                    <div class="dash-title">&nbsp</div>
+                    <div id="stat-value" class="item-stats-data"></div>
+                </div>
+
+            </div>
+
+
+        </div>
+
+    </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>
