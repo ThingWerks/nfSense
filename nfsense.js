@@ -29,10 +29,10 @@ script = {
             cp.execSync("systemctl enable nftables.service");
             console.log("enabling now");
             //needed if have bridge
-            //  cp.execSync("sudo sed 's`Wants=network-pre.target`#Wants=network-pre.target`' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
-            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
-            //  cp.execSync("sudo sed 's`Before=network-pre.target shutdown.target`After=network.target' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
-            //  cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
+            cp.execSync("sudo sed 's`Wants=network-pre.target`#Wants=network-pre.target`' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
+            cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
+            cp.execSync("sudo sed 's`Before=network-pre.target shutdown.target`After=network.target' /etc/systemd/system/sysinit.target.wants/nftables.service >tmp");
+            cp.execSync("sudo mv tmp /etc/systemd/system/sysinit.target.wants/nftables.service");
         }
         else console.log("already enabled");
 
@@ -51,18 +51,18 @@ script = {
         process.exit();
     },
     gatewayMonitor: function () {
-        for (let x = 0; x < cfg.gateways.length; x++) {
-            let gateway = state.gateways[x], config = cfg.gateways[x], lostLan = 0, lostLanPercent = 0, averageLan = 0, averageLanCalc = 0,
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
+            let gateway = state.gateways[x], config = cfg.network.gateway.pool[x], lostLan = 0, lostLanPercent = 0, averageLan = 0, averageLanCalc = 0,
                 lostWan = 0, lostWanPercent = 0, averageWan = 0, wanTotalSamples = cfg.monitor.wan.samples * cfg.monitor.wan.targets.length
                 , averageWanTally = wanTotalSamples, averageWanCalc = 0;
             if (cfg.monitor.lan.enable == true) {
-                if (state.gateways[cfg.gateways.length - 1].sampleLAN.length == cfg.monitor.lan.samples) {
+                if (state.gateways[cfg.network.gateway.pool.length - 1].sampleLAN.length == cfg.monitor.lan.samples) {
                     if (gateway.sampleWAN[cfg.monitor.wan.targets.length - 1].length == cfg.monitor.wan.samples) start();
                 }
             } else if (gateway.sampleWAN[cfg.monitor.wan.targets.length - 1].length == cfg.monitor.wan.samples) start();
             function start() {
                 if (state.boot == false) {
-                    if (x == cfg.gateways.length - 1) state.boot = true;
+                    if (x == cfg.network.gateway.pool.length - 1) state.boot = true;
                     return;
                 } else discover();
             }
@@ -130,12 +130,12 @@ script = {
     },
     pingLan: function () {
         let wait = 0;
-        for (let x = 0; x < cfg.gateways.length; x++) {
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             setTimeout(() => {
-                //       console.log("pinging wan " + cfg.gateways[x].name + " (" + cfg.gateways[x].ip
+                //       console.log("pinging wan " + cfg.network.gateway.pool[x].name + " (" + cfg.network.gateway.pool[x].ip
                 //            + ") with mark: " + (x + 1));
-                app.pingAsync(cfg.gateways[x].ip, state.gateways[x].sampleLAN, state.sampleLAN, 0);
-                if (x == cfg.gateways.length - 1) {
+                app.pingAsync(cfg.network.gateway.pool[x].ip, state.gateways[x].sampleLAN, state.sampleLAN, 0);
+                if (x == cfg.network.gateway.pool.length - 1) {
                     if (state.sampleLAN < cfg.monitor.lan.samples - 1) state.sampleLAN++;
                     else state.sampleLAN = 0;
                     setTimeout(() => { script.pingLan(); }, cfg.monitor.lan.interval * 1e3);
@@ -146,13 +146,13 @@ script = {
     },
     pingWan: function () {
         let wait = 0;
-        for (let x = 0; x < cfg.gateways.length; x++) {
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             for (let y = 0; y < cfg.monitor.wan.targets.length; y++) {
                 setTimeout(() => {
-                    //     console.log("pinging wan " + cfg.gateways[x].name + " (" + cfg.monitor.wan.targets[y]
+                    //     console.log("pinging wan " + cfg.network.gateway.pool[x].name + " (" + cfg.monitor.wan.targets[y]
                     //          + ") with mark: " + (x + 1));
                     app.pingAsync(cfg.monitor.wan.targets[y], state.gateways[x].sampleWAN[y], state.sampleWAN, (x + 1));
-                    if (x == cfg.gateways.length - 1 && y == cfg.monitor.wan.targets.length - 1) {
+                    if (x == cfg.network.gateway.pool.length - 1 && y == cfg.monitor.wan.targets.length - 1) {
                         if (state.sampleWAN < cfg.monitor.wan.samples - 1) state.sampleWAN++;
                         else state.sampleWAN = 0;
                         setTimeout(() => { script.pingWan(); }, cfg.monitor.wan.interval * 1e3);
@@ -165,12 +165,12 @@ script = {
     pingWanRound: function () {
         let wait = 0;
         for (let y = 0; y < cfg.monitor.wan.targets.length; y++) {
-            for (let x = 0; x < cfg.gateways.length; x++) {
+            for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
                 setTimeout(() => {
-                    //    console.log("pinging wan " + cfg.gateways[x].name + " (" + cfg.monitor.wan.targets[y]
+                    //    console.log("pinging wan " + cfg.network.gateway.pool[x].name + " (" + cfg.monitor.wan.targets[y]
                     //        + ") with mark: " + (x + 1)); 
                     app.pingAsync(cfg.monitor.wan.targets[y], state.gateways[x].sampleWAN[y], state.sampleWAN, (x + 1));
-                    if (x == cfg.gateways.length - 1 && y == cfg.monitor.wan.targets.length - 1) {
+                    if (x == cfg.network.gateway.pool.length - 1 && y == cfg.monitor.wan.targets.length - 1) {
                         if (state.sampleWAN < cfg.monitor.wan.samples - 1) state.sampleWAN++;
                         else state.sampleWAN = 0;
                         setTimeout(() => { script.pingWanRound(); }, cfg.monitor.wan.interval * 1e3);
@@ -243,12 +243,12 @@ script = {
                     }
                 }
                 function switchGateway(gateway, x) {
-                    console.log("gateway   - failover - selecting gateway " + cfg.gateways[x].name);
+                    console.log("gateway   - failover - selecting gateway " + cfg.network.gateway.pool[x].name);
                     let interface = gateway.interface || cfg.network.interface[1]
                         ? cfg.network.interface[1].if : cfg.network.interface[0].if;
-                    if (cfg.gateways[x].allowedIPs != undefined && cfg.gateways[x].allowedIPs.length > 0) {
+                    if (cfg.network.gateway.pool[x].allowedIPs != undefined && cfg.network.gateway.pool[x].allowedIPs.length > 0) {
                         console.log("gateway   - failover - applying NAT restricted access");
-                        nft.update('nat postrouting', 'masquerade', 'ip saddr {' + cfg.gateways[x].allowedIPs
+                        nft.update('nat postrouting', 'masquerade', 'ip saddr {' + cfg.network.gateway.pool[x].allowedIPs
                             + '} oif "' + interface + '" masquerade');
                     } else if (cfg.service.portal.enabled) {
                         nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "' + interface + '" masquerade');
@@ -257,7 +257,7 @@ script = {
                             + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
                     }
                     try { cp.execSync("ip route delete default"); } catch { }
-                    try { cp.execSync("ip route add default via " + cfg.gateways[x].ip); } catch { }
+                    try { cp.execSync("ip route add default via " + cfg.network.gateway.pool[x].ip); } catch { }
                     if (cfg.vpn.wireguard.client && cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.client.connectAll();
                     state.gatewaySelected = x;
                 }
@@ -311,7 +311,7 @@ script = {
         let ip_rules = cp.execSync("ip rule show").toString();
         let routes = "", error = false;
         console.log("system    - updating routing tables");
-        for (let x = 0; x < cfg.gateways.length; x++) {
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             if (rt_tables.includes((x + 1) + " gw" + (x + 1))) { } //console.log("rt_tables includes gateway: " + x);
             else {
                 // console.log("rt_tables doesnt have gateway: " + x + ", creating...");
@@ -325,13 +325,13 @@ script = {
             // console.log("ip_route re/creating routes for gateway: " + x);
             try {
                 cp.execSync("sudo ip route flush table gw" + (x + 1));
-                cp.execSync("ip route add default via " + cfg.gateways[x].ip + " table gw" + (x + 1));
+                cp.execSync("ip route add default via " + cfg.network.gateway.pool[x].ip + " table gw" + (x + 1));
                 cp.execSync("ip route add " + cfg.network.interface[0].subnetCIDR[0] + '/'
                     + cfg.network.interface[0].subnetCIDR[1]
                     + " dev " + cfg.network.interface[0].if + " table gw" + (x + 1))
             } catch {
                 try {
-                    cp.execSync("ip route add default via " + cfg.gateways[x].ip + " table gw" + (x + 1));
+                    cp.execSync("ip route add default via " + cfg.network.gateway.pool[x].ip + " table gw" + (x + 1));
                     cp.execSync("ip route add " + cfg.network.interface[0].subnetCIDR[0] + '/'
                         + cfg.network.interface[0].subnetCIDR[1]
                         + " dev " + cfg.network.interface[0].if + " table gw" + (x + 1))
@@ -342,6 +342,15 @@ script = {
                 }
             }
         }
+        for (let x = 0; x < cfg.network.gateway.routes.length; x++) {
+            try {
+                cp.execSync("ip route add " + cfg.network.gateway.routes[x]);
+                console.log("system    - adding route - " + cfg.network.gateway.routes[x]);
+            } catch (e) {
+                //   console.log(e);
+                //  console.log("system    - adding route - " + cfg.network.gateway.routes[x] + " - FAILED");
+            }
+        }
         if (error) setTimeout(() => {
             console.log("trying to set routes again");
             script.checkRoutes();
@@ -349,7 +358,7 @@ script = {
     },
     calcWeight: function (sequence) {
         let prep = [];
-        for (let x = 0; x < sequence.length; x++) prep.push(cfg.gateways[x].weight);
+        for (let x = 0; x < sequence.length; x++) prep.push(cfg.network.gateway.pool[x].weight);
         return calc(prep);
         function calc(weights) {
             const totalShares = 100;
@@ -376,11 +385,11 @@ script = {
         let pbuf = "", gbuf = "";
         pbuf += "gateway   - Users: " + stat.dhcp.total;
         pbuf += " - Total Connections: " + (stat.conntrack.total - 1) + " |";
-        for (let x = 0; x < cfg.gateways.length; x++)
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++)
             pbuf += " R" + (x + 1) + ":" + stat.conntrack.gateways[x] + "|";
         gbuf = "gateway   - Modem Status: |";
-        for (let x = 0; x < cfg.gateways.length; x++) {
-            gbuf += cfg.gateways[x].name + " - ";
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
+            gbuf += cfg.network.gateway.pool[x].name + " - ";
             if (state.gateways.status == undefined || state.gateways.status == "online") gbuf += "ON";
             else if (state.gateways.status.includes("offline")) gbuf += "OFF";
             else if (state.gateways.status.includes("degraded")) gbuf += "deg";
@@ -399,7 +408,7 @@ script = {
             stat_nv.bw[x][0][time.min10] = stat.bw[x][0];
             stat_nv.bw[x][1][time.min10] = stat.bw[x][1];
         }
-        for (let x = 0; x < cfg.gateways.length; x++) {
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             if (stat_nv.avg5Min.gateways[x] != undefined)
                 stat_nv.gateways.pingDropsWan[x]
                     = Math.floor(stat_nv.avg5Min.gateways[x].reduce((a, b) => a + b, 0));
@@ -541,29 +550,25 @@ app = {
         create: function (flush) {
             nft = app.nft.command;
             state.gatewaySelected = undefined;
-
-            console.log("nftables  - creating basic filter rules");
-            cp.execSync('nft flush chain ip filter forward');
-            nft.update("filter forward", "icmp_allow", 'ip protocol icmp accept', true);
-            nft.update("filter forward", "conntrack_new_allow", 'ct state new ip daddr 0.0.0.0/0 accept', true);
-
-            if (cfg.network.restrict) {
-                if (cfg.network.restrict.dns && cfg.network.restrict.dns.length > 0) {
-                    console.log("nftables  - creating DNS block list - ", cfg.network.restrict.dns);
-                    let list = cfg.network.interface[0].ip + ', ' + cfg.network.restrict.dns.join(",");
-                    nft.update("filter forward", "dns_block", 'ip protocol { tcp, udp } th dport 53 drop', true);
-                    nft.update("filter forward", "dns_allow", 'ip daddr { ' + list + ' } ip protocol { tcp, udp } th dport 53 accept', true);
+            if (cfg.firewall && cfg.firewall.self && cfg.firewall.self.length > 0) {
+                console.log("nftables  - flushing input chain");
+                cp.execSync('nft flush chain ip filter input');
+                for (let x = 0; x < cfg.firewall.self.length; x++) {
+                    nft.update("filter input", cfg.firewall.self[x].name, cfg.firewall.self[x].nft);
                 }
             }
-            nft.update("filter forward", "wireguard_allow_in", ' iifname "wg*" accept');
-            nft.update("filter forward", "wireguard_allow_out", ' oifname "wg*" accept');
+            console.log("nftables  - flushing forward chain");
+            cp.execSync('nft flush chain ip filter forward');
+            if (cfg.firewall && cfg.firewall.forward)
+                for (let x = 0; x < cfg.firewall.forward.length; x++) {
+                    nft.update("filter forward", cfg.firewall.forward[x].name, cfg.firewall.forward[x].nft);
+                }
 
             if (flush !== false) {
                 console.log("nftables  - flushing all speed limiter tables");
                 cfg.network.speed.mac.forEach(element => { nft.flush("filter", element.name); });
                 arp = {};
             }
-
             console.log("nftables  - flushing mangle chain");
             try { cp.execSync('nft flush chain ip mangle prerouting'); }
             catch {
@@ -574,7 +579,6 @@ app = {
                 }
             }
             state.nfTables.mangle = undefined;
-
             if (cfg.network.speed.mac[1] != undefined || cfg.network.speed.ip.length > 0) {
                 nft.delete("filter forward", "speed_unrestricted");
                 cp.execSync('nft add chain ip filter speed_limiter');
@@ -586,7 +590,6 @@ app = {
                 nft.delete("filter forward", "speed_jump");
                 nft.add("filter forward", "speed_unrestricted", "ct state related,established ip daddr 0.0.0.0/0 accept");
             }
-
             if (cfg.network.speed.ip.length > 0) {
                 console.log("nftables  - speed - creating MAC limiters");
                 nft.speedIP();
@@ -595,7 +598,6 @@ app = {
                 console.log("nftables  - speed - creating MAC limiters");
                 nft.speedMAC();
             }
-
             if (cfg.service.portal.enabled) {
                 console.log("nftables  - setting up nat for portal");
                 if (flush !== false) {
@@ -619,6 +621,16 @@ app = {
                 nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
                     + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + ((cfg.network.interface[1])
                         ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
+            }
+            if (cfg.firewall) {
+                if (cfg.firewall.dnat)
+                    for (let x = 0; x < cfg.firewall.dnat.length; x++) {
+                        nft.update("nat prerouting", cfg.firewall.dnat[x].name, cfg.firewall.dnat[x].nft);
+                    }
+                if (cfg.firewall.snat)
+                    for (let x = 0; x < cfg.firewall.snat.length; x++) {
+                        nft.update("nat postrouting", cfg.firewall.snat[x].name, cfg.firewall.snat[x].nft);
+                    }
             }
             function createNat() {
                 cp.execSync('nft add table ip nat');
@@ -1149,7 +1161,9 @@ app = {
                                             match: {
                                                 op: "==",
                                                 left: { payload: { protocol: "ip", field: "saddr" } },
-                                                right: { range: rule.range }
+                                                right: (rule.set ? { set: rule.set }
+                                                    : (rule.range ? { range: rule.range }
+                                                        : { prefix: { addr: rule.cidr[0], len: rule.cidr[1] } }))
                                             }
                                         },
                                         {
@@ -1243,7 +1257,9 @@ app = {
                                             match: {
                                                 op: "==",
                                                 left: { payload: { protocol: "ip", field: "daddr" } },
-                                                right: { range: rule.range }
+                                                right: (rule.set ? { set: rule.set }
+                                                    : (rule.range ? { range: rule.range }
+                                                        : { prefix: { addr: rule.cidr[0], len: rule.cidr[1] } }))
                                             }
                                         },
                                         { accept: null }
@@ -1466,13 +1482,13 @@ app = {
     getConGateways: function (print) {
         x = 0;
         get();
-        //  for (let x = 0; x < cfg.gateways.length; x++)
+        //  for (let x = 0; x < cfg.network.gateway.pool.length; x++)
         function get() {
             cp.exec("conntrack -L -m " + (x + 1) + " | grep flow", (error) => {
                 stat.conntrack.gateways[x] = Number(parse(error.toString(), "\\(conntrack-tools\\)", " ", undefined, true));
                 //    console.log("Gateway " + (x + 1) + ":" + stat.conntrack.gateways[x]);
-                if (print && x == cfg.gateways.length - 1) { app.getConnTotal(true) }
-                else if (x < cfg.gateways.length) { x++; get(); }
+                if (print && x == cfg.network.gateway.pool.length - 1) { app.getConnTotal(true) }
+                else if (x < cfg.network.gateway.pool.length) { x++; get(); }
             })
         }
     },
@@ -1912,9 +1928,7 @@ server = {
                     chart: { bandwidth: { x: Date.now(), y: stat.bw[0][1], y2: stat.bw[0][0] } },
                 }));
             }, 1e3);
-
-            ws.send(JSON.stringify({ cfg: { gateways: cfg.gateways } }));
-
+            ws.send(JSON.stringify({ cfg: { gateways: cfg.network.gateway.pool } }));
         });
         wss.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
@@ -1922,7 +1936,6 @@ server = {
             console.log('webserver - websocket client connected - ' + clientIp);
             setInterval(() => { ws.send(JSON.stringify(wsObject())); }, 1e3);
             ws.send(JSON.stringify({ cfg }));
-
         });
         swss.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
@@ -2314,7 +2327,7 @@ server = {
                     "\t\t\t" + global.retry + " ; Retry",
                     "\t\t\t" + global.expire + " ; Expire",
                     "\t\t\t" + global.ttlMin + " ) ; Minimum TTL",
-                    "\tIN\tNS\t" + zone.nameServer,
+                    "\tIN\tNS\t" + zone.nameServer + ".",
                 ]
                 for (let y = 0; y < cfg.service.dns.zones[x].records.length; y++) {
                     record = cfg.service.dns.zones[x].records[y];
@@ -2332,7 +2345,7 @@ server = {
         console.log("system    - starting Portal DNS server...")
         serviceConfig();
         service.dnsPortal = cp.spawn('named', ['-f', '-c', "/etc/bind/named.conf.local"]);
-        service.dnsPortal.stdout.on('data', (chunk) => { console.log("NORMAL DADA: " + data) });
+        service.dnsPortal.stdout.on('data', (chunk) => { console.log("NORMAL DATA: " + data) });
         service.dnsPortal.stderr.on('data', (chunk) => { console.log(chunk.toString()); });
         service.dnsPortal.on('close', (code) => {
             console.log("system    - DNSMasq (Portal) exited with code: " + code + ", restarting...");
@@ -2343,15 +2356,15 @@ server = {
             let zone = [
                 "$TTL 86400",
                 "@   IN  SOA ns.captive.local. admin.captive.local. (",
-                "        2024022001  ; Serial number (change when updating)",
+                "        2024022001  ; Serial number",
                 "        3600        ; Refresh",
                 "        1800        ; Retry",
                 "        604800      ; Expire",
                 "        86400       ; Minimum TTL",
-                ")\n",
-                "    IN  NS  ns.captive.local.\n",
-                "ns  IN  A   " + cfg.network.interface[0].ip + "  ; Change to your DNS server's IP",
-                "*   IN  A   " + cfg.network.interface[0].ip + "  ; Redirect all domains to captive portal",
+                ")",
+                "    IN  NS  ns.captive.local.",
+                "ns  IN  A   " + cfg.network.interface[0].ip,
+                "*   IN  A   " + cfg.network.interface[0].ip
             ]
             fs.writeFileSync("/etc/bind/db.portal", zone.join("\n"));
             cp.execSync("chmod 644 /etc/bind/db.portal");
@@ -2514,7 +2527,7 @@ sys = {
             stat.bw.push([]);
             stat.avg.bw.push([[], []])
         }
-        for (let x = 0; x < cfg.gateways.length; x++) {
+        for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             state.gateways.push({
                 status: undefined,
                 offline: false,
