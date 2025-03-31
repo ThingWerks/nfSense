@@ -342,13 +342,16 @@ script = {
                 }
             }
         }
-        for (let x = 0; x < cfg.network.gateway.routes.length; x++) {
-            try {
-                cp.execSync("ip route add " + cfg.network.gateway.routes[x]);
-                console.log("system    - adding route - " + cfg.network.gateway.routes[x]);
-            } catch (e) {
-                //   console.log(e);
-                //  console.log("system    - adding route - " + cfg.network.gateway.routes[x] + " - FAILED");
+        if (cfg.network.routes != undefined) {
+            for (let x = 0; x < cfg.network.routes.length; x++) {
+                let route = cfg.network.routes[x]
+                try {
+                    cp.execSync("ip route add " + route.network + " via " + route.router);
+                    console.log("system    - adding route - network:" + route.network + ", router: " + route.router);
+                } catch (e) {
+                    //   console.log(e);
+                    //  console.log("system    - adding route - " + cfg.network.gateway.routes[x] + " - FAILED");
+                }
             }
         }
         if (error) setTimeout(() => {
