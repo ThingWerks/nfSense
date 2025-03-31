@@ -31,11 +31,42 @@
         "socketTimeout": 43200,
         "arpTimeout": 600,
         "arpRefresh": 1000,
+        "routes": [
+            {
+                "network": "10.21.0.0/23",
+                "router": "172.16.10.1"
+            },
+            {
+                "network": "172.16.0.0/24",
+                "router": "172.16.10.1"
+            }
+        ],
         "gateway": {
             "mode": "teaming",
             "failAll": true,
             "startAll": true,
-            "weighted": false
+            "weighted": false,
+            "pool": [
+                {
+                    "name": "Jesmark",
+                    "ip": "172.16.10.1",
+                    "weight": 10
+                },
+                {
+                    "name": "Cartegena",
+                    "ip": "172.16.10.3",
+                    "weight": 10
+                },
+                {
+                    "name": "Globe",
+                    "ip": "172.16.11.2",
+                    "interface": "enxc8a362594018",
+                    "allowedIPs": [
+                        "10.21.55.13",
+                        "10.21.55.10"
+                    ]
+                }
+            ]
         },
         "restrict": {
             "dns": [
@@ -79,7 +110,28 @@
                     "downBurst": 8000
                 }
             ],
-            "ip": []
+            "ip": [
+                {
+                    "name": "Abba_nfSense",
+                    "range": [
+                        "172.16.10.1",
+                        "172.16.10.254"
+                    ],
+                    "set": [
+                        "172.16.10.1",
+                        "172.16.10.1",
+                        "172.16.10.1"
+                    ],
+                    "cidr": [
+                        "172.16.10.1",
+                        24
+                    ],
+                    "up": 5000,
+                    "upBurst": 8000,
+                    "down": 5000,
+                    "downBurst": 8000
+                }
+            ]
         }
     },
     "services": {
@@ -215,27 +267,6 @@
             ]
         }
     },
-    "gateways": [
-        {
-            "name": "Jesmark",
-            "ip": "172.16.10.1",
-            "weight": 10,
-        },
-        {
-            "name": "Cartegena",
-            "ip": "172.16.10.3",
-            "weight": 10
-        },
-        {
-            "name": "Globe",
-            "ip": "172.16.11.2",
-            "interface": "enxc8a362594018",
-            "allowedIPs": [
-                "10.21.55.13",
-                "10.21.55.10"
-            ]
-        }
-    ],
     "monitor": {
         "reconnect": 5,
         "lan": {
@@ -262,5 +293,77 @@
                 "1.1.1.1"
             ]
         }
+    },
+    "firewall": {
+        "self": [
+            {
+                "name": "loopback_accept",
+                "nft": "iif 'lo' accept"
+            },
+            {
+                "name": "conntrack_related_established",
+                "nft": "ct state established,related accept"
+            },
+            {
+                "name": "icmp_allow",
+                "nft": "ip protocol icmp accept"
+            },
+            {
+                "name": "ssh_allow",
+                "nft": "tcp dport 22 accept"
+            },
+            {
+                "name": "sdns_allow",
+                "nft": "tcp dport 953 accept"
+            },
+            {
+                "name": "web_allow",
+                "nft": "tcp dport 80-85 accept"
+            },
+            {
+                "name": "dns_allow",
+                "nft": "ip protocol { tcp, udp } th dport 52-53 accept"
+            },
+            {
+                "name": "https_allow",
+                "nft": "ip protocol { tcp, udp } th dport 445 accept"
+            },
+            {
+                "name": "samba_allow",
+                "nft": "ip protocol { tcp, udp } th dport 137-139 accept"
+            }
+        ],
+        "snat": [
+            {
+                "name": "abba_ptp_nat",
+                "nft": "ip saddr 172.16.10.0/24 oif 'enp1s0' masquerade"
+            }
+        ],
+        "forward": [
+            {
+                "name": "Needed_if_no_limiters",
+                "nft": "ct state new ip daddr 0.0.0.0/0 accept"
+            },
+            {
+                "name": "icmp_allow",
+                "nft": "ip protocol icmp accept"
+            },
+            {
+                "name": "dns_allow",
+                "nft": "ip daddr { 1.1.1.3, 1.0.0.3, 208.67.222.123 } ip protocol { tcp, udp } th dport 53 accept"
+            },
+            {
+                "name": "dns_block",
+                "nft": "ip protocol { tcp, udp } th dport 53 drop"
+            },
+            {
+                "name": "wireguard_allow_in",
+                "nft": "iifname 'wg*' accept"
+            },
+            {
+                "name": "wireguard_allow_out",
+                "nft": "oifname 'wg*' accept"
+            }
+        ]
     }
 }
