@@ -553,15 +553,29 @@ app = {
         create: function (flush) {
             nft = app.nft.command;
             state.gatewaySelected = undefined;
+
+
+            cp.execSync('nft flush ruleset');
+             nft.cTable("filter", "output", "filter", "0", "accept");
             if (cfg.firewall && cfg.firewall.self && cfg.firewall.self.length > 0) {
                 console.log("nftables  - flushing input chain");
-                cp.execSync('nft flush chain ip filter input');
+                try { cp.execSync('nft flush chain ip filter input'); }
+                catch {
+                    console.log("nftables  - creating - filter input chain");
+                    // cp.execSync('nft add chain ip filter input');
+                    nft.cTable("filter", "input", "filter", "0", "drop");
+                }
                 for (let x = 0; x < cfg.firewall.self.length; x++) {
                     nft.update("filter input", cfg.firewall.self[x].name, cfg.firewall.self[x].nft);
                 }
             }
             console.log("nftables  - flushing forward chain");
-            cp.execSync('nft flush chain ip filter forward');
+            try { cp.execSync('nft flush chain ip filter forward'); }
+            catch {
+                console.log("nftables  - creating - filter forward chain");
+                // cp.execSync('nft add chain ip filter forward');
+                nft.cTable("filter", "forward", "filter", "0", "drop");
+            }
             if (cfg.firewall && cfg.firewall.forward)
                 for (let x = 0; x < cfg.firewall.forward.length; x++) {
                     nft.update("filter forward", cfg.firewall.forward[x].name, cfg.firewall.forward[x].nft);
@@ -2281,10 +2295,10 @@ server = {
         }
     },
     dnsBind9: function () {
-        console.log("system    - starting DNS server...")
+        console.log("system    - starting Bind 9 DNS server...")
         serviceConfig();
         service.dns9 = cp.spawn('named', ['-f', '-c', '/etc/bind/named.conf']);
-        service.dns9.stdout.on('data', (data) => { console.log("NORMAL DADA: " + data) });
+        service.dns9.stdout.on('data', (data) => { console.log("NORMAL DADA: " + data.toString()) });
         service.dns9.stderr.on('data', (data) => { console.log("DNS Server: " + data.toString()) });
         service.dns9.on('close', (code, data) => {
             console.log("system    - Bind9 exited with code: " + code + ", restarting...");
