@@ -2594,7 +2594,6 @@ sys = {
         service = {};
         arp = {};
         spawnC = [];
-
         stat = {
             cpu: [],
             bw: [],
@@ -2630,7 +2629,12 @@ sys = {
             },
             conntrack: { totalMin: [], },
             dhcp: { entries: [], entriesLast: [], entriesLastPos: 0, },
-            fileTimer: {},
+            timer: {
+                file: {
+                    write: [],
+                    writeLast: []
+                }
+            },
             wg: { client: [] }
         }
         for (let x = 0; x < cfg.network.interface.length; x++) {
@@ -3087,26 +3091,35 @@ sys = {
         };
         file = {
             write: function (file) {
-                if (!state.fileTimer[file]) state.fileTimer[file] = null;
-                clearTimeout(state.fileTimer[file]);
-                state.fileTimer[file] = setTimeout(() => {
+                state.timer.file.write[file] ||= null;
+                state.timer.file.writeLast[file] ||= time.epoch;
+                clearTimeout(state.timer.file.write[file]);
+                if (time.epoch - state.timer.file.writeLast[file] > 10) writeFile();
+                else state.timer.file.write[file] = setTimeout(() => { writeFile(); }, 10e3);
+                function writeFile() {
                     if (file != "stat_nv" && file != "guest") log("saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
                     fs.writeFile(path.app + "nfsense-" + file + ".tmp", JSON.stringify(global[file], null, 2), 'utf-8', (e) => {
                         cp.exec("cp " + path.app + "nfsense-" + file + ".tmp " + path.app + "nfsense-" + file + ".json", () => { });
                     })
-                }, 5e3);
+                    state.timer.file.writeLast[file] = time.epoch;
+                }
             },
             read: function (file) {
                 try {
                     log("loading " + file + " data");
                     global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
                 } catch (e) {
-                    // log(e)
-                    log("read error - " + file + " file does not exist, creating");
-                    // cp.execSync("touch " + path.app + "nfsense-" + file + ".json")
-                    fs.writeFileSync(path.app + "nfsense-" + file + ".json", "{ }", "utf8");
-                    global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
-                    //process.exit();
+                    if (file != "cfg") {
+                        // log(e)
+                        log("read error - " + file + " file does not exist, creating");
+                        // cp.execSync("touch " + path.app + "nfsense-" + file + ".json")
+                        fs.writeFileSync(path.app + "nfsense-" + file + ".json", "{ }", "utf8");
+                        global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
+                    } else {
+                        log("read error - " + file + " config file does not exist, exiting");
+                        process.exit();
+                    }
+
                 }
             }
         };
