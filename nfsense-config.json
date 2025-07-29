@@ -15,13 +15,16 @@
             "client": [
                 {
                     "name": "Elite",
-                    "endpoint": "vpn.-----.com:1020",
-                    "keyPrivate": "=",
-                    "keyPublic": "=",
-                    "keyServer": "=",
-                    "address": "10.255.0.2/24",
-                    "networks": "10.255.0.0/24, 10.21.88.0/24, 172.16.255.0/24, 10.22.0.0/23, 10.21.55.0/24, 10.11.0.0/21",
-                    "keepalive": 25
+                    "enabled": true,
+                    "endpoint": "vpn.====.com:1020",
+                    "keyPrivate": "======",
+                    "keyPublic": "=======",
+                    "keyServer": "========",
+                    "address": "10.255.0.5/24",
+                    "networks": "10.255.0.0/24, 10.254.0.0/24, 172.16.255.0/24, 10.22.0.0/23, 10.10.0.0/19",
+                    "reconnect": 10,
+                    "keepalive": 60,
+                    "keepaliveAddress": "10.255.0.1"
                 }
             ]
         }
@@ -31,40 +34,36 @@
         "socketTimeout": 43200,
         "arpTimeout": 600,
         "arpRefresh": 1000,
+        "central": {
+            "key": "================",
+            "clients": [
+                "10.21.0.12"
+            ]
+        },
         "routes": [
             {
-                "network": "10.21.0.0/23",
-                "router": "172.16.10.1"
+                "network": "10.21.55.0/24",
+                "router": "10.21.0.38"
             },
             {
-                "network": "172.16.0.0/24",
-                "router": "172.16.10.1"
+                "network": "172.16.0.0/29",
+                "router": "10.21.0.38"
+            },
+            {
+                "network": "172.16.0.8/29",
+                "router": "10.21.0.38"
             }
         ],
         "gateway": {
-            "mode": "teaming",
+            "mode": null,
             "failAll": true,
             "startAll": true,
             "weighted": false,
             "pool": [
                 {
-                    "name": "Jesmark",
-                    "ip": "172.16.10.1",
+                    "name": "PLDT",
+                    "ip": "172.16.254.1",
                     "weight": 10
-                },
-                {
-                    "name": "Cartegena",
-                    "ip": "172.16.10.3",
-                    "weight": 10
-                },
-                {
-                    "name": "Globe",
-                    "ip": "172.16.11.2",
-                    "interface": "enxc8a362594018",
-                    "allowedIPs": [
-                        "10.21.55.13",
-                        "10.21.55.10"
-                    ]
                 }
             ]
         },
@@ -78,12 +77,12 @@
         "interface": [
             {
                 "name": "lan",
-                "if": "enp1s0",
+                "if": "enp2s0",
                 "subnetCIDR": [
-                    "10.10.0.0",
-                    19
+                    "10.21.0.0",
+                    23
                 ],
-                "ip": "10.10.0.1"
+                "ip": "10.21.0.1"
             },
             {
                 "name": "wan",
@@ -108,33 +107,34 @@
                     "upBurst": 8000,
                     "down": 5000,
                     "downBurst": 8000
+                },
+                {
+                    "name": "twentyMbps",
+                    "up": 20000,
+                    "upBurst": 30000,
+                    "down": 20000,
+                    "downBurst": 30000
+                },
+                {
+                    "name": "oneHundredMbps",
+                    "up": 100000,
+                    "upBurst": 100000,
+                    "down": 100000,
+                    "downBurst": 100000
                 }
             ],
             "ip": [
                 {
                     "name": "Abba_nfSense",
-                    "range": [
-                        "172.16.10.1",
-                        "172.16.10.254"
-                    ],
-                    "set": [
-                        "172.16.10.1",
-                        "172.16.10.1",
-                        "172.16.10.1"
-                    ],
                     "cidr": [
-                        "172.16.10.1",
+                        "172.16.0.0",
                         24
-                    ],
-                    "up": 5000,
-                    "upBurst": 8000,
-                    "down": 5000,
-                    "downBurst": 8000
+                    ]
                 }
             ]
         }
     },
-    "services": {
+    "service": {
         "web": {
             "port": 80,
             "adminPort": 82,
@@ -142,22 +142,14 @@
                 {
                     "host": "default - do not remove",
                     "target": "change only the target if you dont want portal as the default forward - otherwise leave this string"
-                },
-                {
-                    "host": "----.----",
-                    "target": "http://laundry.daren:2000"
-                },
-                {
-                    "host": "---.-----.---",
-                    "target": "http://usfw.thwerks.com:83/monitor"
                 }
             ]
         },
         "telegram": {
             "enabled": true,
-            "token": "-------:-----",
+            "token": "========",
             "admins": [
-                99999999
+                6176063468
             ]
         },
         "portal": {
@@ -173,28 +165,28 @@
         },
         "dhcp": {
             "enabled": true,
-            "subnet": "10.10.0.0",
-            "mask": "255.255.224.0",
-            "rangeStart": "10.10.13.1",
-            "rangeEnd": "10.10.30.255",
-            "nameServer": "10.10.0.1",
-            "router": "10.10.0.1",
-            "broadcast": "10.10.31.255",
+            "subnet": "10.21.0.0",
+            "mask": "255.255.254.0",
+            "rangeStart": "10.21.0.100",
+            "rangeEnd": "10.21.1.254",
+            "nameServer": "10.21.0.1",
+            "router": "10.21.0.1",
+            "broadcast": "10.21.1.255",
             "domain": "thwerks.com",
             "leaseDefault": 86400,
             "leaseMax": 86400,
             "blockUnknown": false,
             "bindings": [
                 {
-                    "name": "-----v60",
-                    "mac": "--:4f:--:e6:e7:--",
-                    "ip": "10.10.0.13"
+                    "name": "Daren-v60",
+                    "mac": "ff:ff:ff:ff:ff:ff",
+                    "ip": "10.21.0.13"
                 }
             ]
         },
         "dns": {
             "enabled": true,
-            "localDomain": "----",
+            "localDomain": "mam.thwerks.com",
             "cacheSize": 500000,
             "cacheTTLmin": 90,
             "cacheTTLmax": 604800,
@@ -231,36 +223,34 @@
                     ]
                 },
                 {
-                    "domain": "---.----",
-                    "nameServer": "ns1.----.----.",
-                    "nameServerAddress": "10.10.0.1",
-                    "records": [
-                        {
-                            "prefix": "",
-                            "type": "A",
-                            "address": "10.10.0.1"
-                        }
-                    ]
-                },
-                {
-                    "domain": "----.com",
-                    "nameServer": "----.",
-                    "nameServerAddress": "10.10.0.1",
+                    "domain": "thwerks.com",
+                    "nameServer": "mam",
+                    "nameServerAddress": "10.21.0.1",
                     "records": [
                         {
                             "prefix": "",
                             "type": "A",
                             "address": "199.231.113.38"
-                        },
-                        {
-                            "prefix": "usfw",
-                            "type": "A",
-                            "address": "10.10.0.1"
                         },
                         {
                             "prefix": "vpn",
                             "type": "A",
                             "address": "199.231.113.38"
+                        },
+                        {
+                            "prefix": "soft",
+                            "type": "A",
+                            "address": "199.231.113.38"
+                        },
+                        {
+                            "prefix": "alvarez",
+                            "type": "A",
+                            "address": "10.21.0.1"
+                        },
+                        {
+                            "prefix": "abba",
+                            "type": "A",
+                            "address": "10.21.55.10"
                         }
                     ]
                 }
@@ -281,8 +271,8 @@
             "reconnect": null
         },
         "wan": {
-            "interval": 0,
-            "samples": 1,
+            "interval": 5,
+            "samples": 4,
             "delay": 1000,
             "latencyWarn": 800,
             "latencyError": 1500,
@@ -321,12 +311,28 @@
                 "nft": "tcp dport 80-85 accept"
             },
             {
+                "name": "iperf_allow",
+                "nft": "tcp dport 5201 accept"
+            },
+            {
+                "name": "esp_allow",
+                "nft": "tcp dport 6052 accept"
+            },
+            {
+                "name": "ha_allow",
+                "nft": "tcp dport 8123 accept"
+            },
+            {
+                "name": "twit_debug",
+                "nft": "tcp dport 20000 accept"
+            },
+            {
                 "name": "dns_allow",
                 "nft": "ip protocol { tcp, udp } th dport 52-53 accept"
             },
             {
                 "name": "https_allow",
-                "nft": "ip protocol { tcp, udp } th dport 445 accept"
+                "nft": "ip protocol { tcp, udp } th dport 443-445 accept"
             },
             {
                 "name": "samba_allow",
@@ -335,10 +341,19 @@
         ],
         "snat": [
             {
-                "name": "abba_ptp_nat",
-                "nft": "ip saddr 172.16.10.0/24 oif 'enp1s0' masquerade"
+                "name": "abba_do_not_nat",
+                "nft": "ip saddr 10.21.0.0/23 ip daddr 10.21.55.0/24 accept"
+            },
+            {
+                "name": "abba_ptp_ap_nat",
+                "nft": "ip saddr 172.16.0.0/29 oif 'enp2s0' masquerade"
+            },
+            {
+                "name": "abba_ptp_client_nat",
+                "nft": "ip saddr 172.16.0.8/29 oif 'enp2s0' masquerade"
             }
         ],
+        "dnat": [],
         "forward": [
             {
                 "name": "Needed_if_no_limiters",
