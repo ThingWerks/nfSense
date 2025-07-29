@@ -107,14 +107,14 @@ script = {
                     if (gateway.statusPrevious == "online") gateway.timer = time.epoch;
                     if (gateway.status == "online" && gateway.statusPrevious != undefined) {
                         if (time.epoch - gateway.timer >= (cfg.monitor.reconnect)) {
-                            console.log("gateway   - " + config.name + " - " + gateway.status + "  -  " + (cfg.monitor.lan.enable ? "LAN average: " + averageLanCalc
+                            log(config.name + " - " + gateway.status + "  -  " + (cfg.monitor.lan.enable ? "LAN average: " + averageLanCalc
                                 + " LAN loss: " + lostLanPercent + "%, " : "") + "WAN Average: " + averageWanCalc + " WAN Loss: "
                                 + lostWanPercent + "%" + ((gateway.statusPrevious.includes("offline")) ? "  - Was offline for " : "  - Was degraded for ")
-                                + (time.epoch - gateway.timer) + " seconds");
+                                + (time.epoch - gateway.timer) + " seconds", 2, 3);
                         }
                     } else {
-                        console.log("gateway   - " + config.name + " - " + gateway.status + "  -  " + (cfg.monitor.lan.enable ? "LAN average:" + averageLanCalc
-                            + " LAN loss: " + lostLanPercent + "%, " : "") + "WAN Average: " + averageWanCalc + " WAN Loss: " + lostWanPercent + "%");
+                        log(config.name + " - " + gateway.status + "  -  " + (cfg.monitor.lan.enable ? "LAN average:" + averageLanCalc
+                            + " LAN loss: " + lostLanPercent + "%, " : "") + "WAN Average: " + averageWanCalc + " WAN Loss: " + lostWanPercent + "%", 2);
                     }
                     if (gateway.status.includes("online") && gateway.offline == true || gateway.statusPrevious == undefined
                         || gateway.status.includes("offline")) {
@@ -209,14 +209,14 @@ script = {
                     }
                 } else {
                     if (sequence.length == 0) {
-                        console.log("gateway   - teaming - all gateways are offline")
+                        log("teaming - all gateways are offline", 2)
                         if (cfg.network.gateway.failAll == false) {
-                            console.log("gateway   - teaming - mangle set to first gateway only")
+                            log("teaming - mangle set to first gateway only", 2)
                             numgen = { mode: "inc", mod: 1, offset: 0 }
                             set = [[0, 1]];
                         }
                         else {
-                            console.log("gateway   - teaming - mangle set to all gateways")
+                            log("teaming - mangle set to all gateways", 2)
                             numgen = { mode: "inc", mod: sequenceAll.length, offset: 0 }
                             for (let x = 0; x < sequenceAll.length; x++)
                                 set.push([x, sequenceAll[x] + 1]);
@@ -242,26 +242,35 @@ script = {
                         }
                     }
                 }
-                function switchGateway(gateway, x) {
-                    console.log("gateway   - failover - selecting gateway " + cfg.network.gateway.pool[x].name);
-                    let interface = gateway.interface || cfg.network.interface[1]
-                        ? cfg.network.interface[1].if : cfg.network.interface[0].if;
-                    if (cfg.network.gateway.pool[x].allowedIPs != undefined && cfg.network.gateway.pool[x].allowedIPs.length > 0) {
-                        console.log("gateway   - failover - applying NAT restricted access");
-                        nft.update('nat postrouting', 'masquerade', 'ip saddr {' + cfg.network.gateway.pool[x].allowedIPs
-                            + '} oif "' + interface + '" masquerade');
-                    } else if (cfg.service.portal.enabled) {
-                        nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "' + interface + '" masquerade');
-                    } else {
-                        nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
-                            + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
-                    }
-                    try { cp.execSync("ip route delete default"); } catch { }
-                    try { cp.execSync("ip route add default via " + cfg.network.gateway.pool[x].ip); } catch { }
-                    if (cfg.vpn.wireguard.client && cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.client.connectAll();
-                    state.gatewaySelected = x;
-                }
+
                 break;
+            case "single":
+            default:
+                if (state.gatewaySelected == undefined) {
+                    log("SINGLE - setting up gateway (0)" + cfg.network.gateway.pool[0].name, 2);
+                    switchGateway(state.gateways[0], 0);
+                }
+                break
+
+        }
+        function switchGateway(gateway, x) {
+            log((gateway.mode == null ? "NULL" : gateway.mode) + " - selecting gateway " + cfg.network.gateway.pool[x].name, 2);
+            let interface = gateway.interface || cfg.network.interface[1]
+                ? cfg.network.interface[1].if : cfg.network.interface[0].if;
+            if (cfg.network.gateway.pool[x].allowedIPs != undefined && cfg.network.gateway.pool[x].allowedIPs.length > 0) {
+                log(gateway.mode + " - applying NAT restricted access", 2);
+                nft.update('nat postrouting', 'masquerade', 'ip saddr {' + cfg.network.gateway.pool[x].allowedIPs
+                    + '} oif "' + interface + '" masquerade');
+            } else if (cfg.service.portal.enabled) {
+                nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "' + interface + '" masquerade');
+            } else {
+                nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
+                    + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + interface + '" masquerade');
+            }
+            try { cp.execSync("ip route delete default"); } catch { }
+            try { cp.execSync("ip route add default via " + cfg.network.gateway.pool[x].ip); } catch { }
+            if (cfg.vpn.wireguard.client && cfg.vpn.wireguard.client.length > 0) app.vpn.wireguard.client.connectAll();
+            state.gatewaySelected = x;
         }
         function nftWrite() {
             app.nft.tables.mangle[2].rule.expr[2].mangle.value.map.key.numgen = numgen;
@@ -277,11 +286,11 @@ script = {
                 nftCreateTable();
             } else {
                 app.nft.tables.mangle[2].rule.handle = state.nfTables.mangle;
-                console.log("nftables  - updating mangle table - ", set);
+                log("updating mangle table - " + set, 2);
                 let command = "printf '" + JSON.stringify({ nftables: [{ replace: app.nft.tables.mangle[2] }] }) + "' | nft -j -f -"
                 cp.exec(command, (e) => {
                     if (e) {
-                        console.log("!!!!!!mangle table doesnt exist anymore, nftables must have been flushed!!!!!!")
+                        log("!!!!!!mangle table doesnt exist anymore, nftables must have been flushed!!!!!!", 2)
                         //  console.error(e);
                         app.nft.create(false);
                         nftCreateTable();
@@ -289,18 +298,18 @@ script = {
                 })
             }
             function nftCreateTable() {
-                console.log("nftables  - creating mangle ruleset");
+                log("creating mangle ruleset", 2);
                 cp.execSync('nft flush chain ip mangle prerouting');
                 let mangleNum, rbuf = [];
                 app.nft.tables.mangle.forEach((e) => { rbuf.push({ add: e }) });
                 let command = "printf '" + JSON.stringify({ nftables: rbuf }) + "' | nft -j -f -"
                 cp.execSync(command);
                 if (cfg.service.portal.enabled) {
-                    console.log("nftables  - adding portal disallow rule");
+                    log("adding portal disallow rule", 2);
                     cp.execSync("nft insert rule mangle prerouting ip saddr != @allow return");
                 }
                 mangleNum = parse(cp.execSync('nft -a list chain ip mangle prerouting').toString(), 'nfsense_mangle" # handle ', '\n')
-                console.log("nftables  - mangle table rule handle is: " + Number(mangleNum));
+                log("mangle table rule handle is: " + Number(mangleNum), 2);
                 state.nfTables.mangle = Number(mangleNum);
             }
         }
@@ -310,7 +319,7 @@ script = {
         let rt_tables = fs.readFileSync("/etc/iproute2/rt_tables", 'utf8');
         let ip_rules = cp.execSync("ip rule show").toString();
         let routes = "", error = false;
-        console.log("system    - updating routing tables");
+        log("updating routing tables");
         for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             if (rt_tables.includes((x + 1) + " gw" + (x + 1))) { } //console.log("rt_tables includes gateway: " + x);
             else {
@@ -337,7 +346,7 @@ script = {
                         + " dev " + cfg.network.interface[0].if + " table gw" + (x + 1))
                 } catch (e) {
                     //  console.log(e);
-                    console.log("setting routes encountered an error, will try again in 5 seconds");
+                    log("setting routes encountered an error, will try again in 5 seconds", 0, 3);
                     error = true;
                 }
             }
@@ -347,7 +356,7 @@ script = {
                 let route = cfg.network.routes[x]
                 try {
                     cp.execSync("ip route add " + route.network + " via " + route.router);
-                    console.log("system    - adding route - network:" + route.network + ", router: " + route.router);
+                    log("adding route - network:" + route.network + ", router: " + route.router);
                 } catch (e) {
                     //   console.log(e);
                     //  console.log("system    - adding route - " + cfg.network.gateway.routes[x] + " - FAILED");
@@ -355,7 +364,7 @@ script = {
             }
         }
         if (error) setTimeout(() => {
-            console.log("trying to set routes again");
+            log("trying to set routes again", 0, 3);
             script.checkRoutes();
         }, 5e3);
     },
@@ -386,20 +395,20 @@ script = {
     },
     printStats: function () {
         let pbuf = "", gbuf = "";
-        pbuf += "gateway   - Users: " + stat.dhcp.total;
-        pbuf += " - Total Connections: " + (stat.conntrack.total - 1) + " |";
+        pbuf += "Users: " + a.color("green", stat.dhcp.total);
+        pbuf += " - Total Connections: " + a.color("green", (stat.conntrack.total - 1)) + " |";
         for (let x = 0; x < cfg.network.gateway.pool.length; x++)
             pbuf += " R" + (x + 1) + ":" + stat.conntrack.gateways[x] + "|";
-        gbuf = "gateway   - Modem Status: |";
+        gbuf = "Modem Status: |";
         for (let x = 0; x < cfg.network.gateway.pool.length; x++) {
             gbuf += cfg.network.gateway.pool[x].name + " - ";
-            if (state.gateways.status == undefined || state.gateways.status == "online") gbuf += "ON";
-            else if (state.gateways.status.includes("offline")) gbuf += "OFF";
-            else if (state.gateways.status.includes("degraded")) gbuf += "deg";
+            if (state.gateways.status == undefined || state.gateways.status == "online") gbuf += a.color("green", "ON");
+            else if (state.gateways.status.includes("offline")) gbuf += a.color("red", "OFF");
+            else if (state.gateways.status.includes("degraded")) gbuf += a.color("orange", "deg");
             gbuf += " |";
         }
-        console.log(pbuf);
-        console.log(gbuf);
+        log(pbuf);
+        log(gbuf);
     },
     getStat: function () {
         stat_nv.bw = stat_nv.bw || [];
@@ -451,7 +460,7 @@ script = {
                 result[randomString] = { duration: (duration * 60 * 60), speed, multi, created: time.epoch };
             }
             //const vouchertest = script.voucher.generate(10, 3, 86400, 1, false, true);
-            console.log("vouchers - creating " + count + " vouchers with a duration of: " + duration + " hours");
+            log("creating " + count + " vouchers with a duration of: " + duration + " hours", 6);
             console.log(result);
             Object.assign(voucher, result);
             file.write("voucher");
@@ -461,17 +470,17 @@ script = {
             if (voucher[code] && arp[mac]) {
                 if (voucher[code].ip != undefined) {
                     if (voucher[code].multi === false) {
-                        console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - clearing old IPs");
+                        log("relogin - code: " + code + ", for mac: " + mac + " - clearing old IPs", 6);
                         script.voucher.nft(voucher[code].ip, voucher[code].speed, "delete");
                         voucher[code].ip = [arp[mac].ip];
                         voucher[code].mac = mac;
                         script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
                     } else if (voucher[code].ip.length <= voucher[code].multi) {
-                        console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - adding new IP");
+                        log("relogin - code: " + code + ", for mac: " + mac + " - adding new IP", 6);
                         script.voucher.nft(voucher[code].ip, voucher[code].speed, "add");
                         voucher[code].ip.push(arp[mac].ip)
                         script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
-                    } else console.log("vouchers  - relogin - code: " + code + ", for mac: " + mac + " - no more slots, disallowed");
+                    } else log("relogin - code: " + code + ", for mac: " + mac + " - no more slots, disallowed", 6);
                     file.write("voucher");
                     voucher[code].update = time.epoch;
                     return true;
@@ -481,8 +490,8 @@ script = {
                     voucher[code].update = time.epoch;
                     voucher[code].ip = [arp[mac].ip];
                     // console.log(voucher[code])
-                    console.log("vouchers  - adding voucher: " + code + ", for mac: " + mac + ", with IP: " + arp[mac].ip
-                        + " - expires in: " + (voucher[code].duration / 60) + " min");
+                    log("adding voucher: " + code + ", for mac: " + mac + ", with IP: " + arp[mac].ip
+                        + " - expires in: " + (voucher[code].duration / 60) + " min", 6);
                     script.voucher.nft(arp[mac].ip, voucher[code].speed, "add");
                     file.write("voucher");
                     return true;
@@ -493,8 +502,8 @@ script = {
             for (const code in voucher) {
                 if (voucher[code] != undefined && voucher[code].activated != undefined
                     && (((time.epoch - voucher[code].activated) / 60) / 60) >= voucher[code].duration) {
-                    console.log("vouchers - session expired - code: " + code + ", for MAC: "
-                        + voucher[code].mac + " removing IP: ", voucher[code].ip);
+                    log("session expired - code: " + code + ", for MAC: "
+                        + voucher[code].mac + " removing IP: ", voucher[code].ip, 6);
                     script.voucher.nft(voucher[code].ip, voucher[code].speed, "delete");
                     delete voucher[code];
                     file.write("voucher");
@@ -509,26 +518,26 @@ script = {
                 if (guest[mac] != undefined) {
                     if (config.hardLimit == true) {
                         if (guest[mac].lockout == true && ((time.epoch - guest[mac].update) / 60) >= config.lockoutPeriod) {
-                            console.log("guest voucher - lockout period expired - for MAC: " + mac + " - removing lockout");
-                            script.voucher.nft(guest[mac].ip, guestSpeed, "delete");
+                            log("lockout period expired - for MAC: " + mac + " - removing lockout", 7);
+                            script.voucher.nft(guest[mac].ip, guestSpeed, "delete", 6);
                             delete guest[mac];
                             file.write("guest");
                         }
                         if (((time.epoch - guest[mac].activated) / 69) >= config.duration) {
                             script.voucher.nft(guest[mac].ip, guestSpeed, "delete");
                             if (config.lockoutPeriod != undefined && config.lockoutPeriod > 0) {
-                                console.log("guest voucher - session hard expired - for MAC: " + mac + ", removing IP: ",
-                                    guest[mac].ip + " - getting locked out for " + config.lockoutPeriod + " minutes");
+                                log("session hard expired - for MAC: " + mac + ", removing IP: " +
+                                    guest[mac].ip + " - getting locked out for " + config.lockoutPeriod + " minutes", 7);
                                 guest[mac].lockout = true;
                                 guest[mac].update = time.epoch;
                             } else {
-                                console.log("guest voucher - session hard expired - mac: " + mac + ", removing IP: ", guest[mac].ip);
+                                log("dession hard expired - mac: " + mac + ", removing IP: " + guest[mac].ip, 7);
                                 delete guest[mac];
                             }
                             file.write("guest");
                         }
                     } else if (((time.epoch - guest[mac].update) / 60) >= config.duration) {
-                        console.log("guest voucher - session expired (no activity) - mac: " + mac + ", removing IP: ", guest[mac].ip);
+                        log("session expired (no activity) - mac: " + mac + ", removing IP: " + guest[mac].ip, 7);
                         script.voucher.nft(guest[mac].ip, guestSpeed, "delete");
                         delete guest[mac];
                         file.write("guest");
@@ -547,21 +556,37 @@ script = {
             cp.exec(buf, (e) => { /* if (e) console.error(e); */ });
         },
     },
+    central: {
+        update: function () {
+            if (cfg.network.central && cfg.network.central.clients != undefined) {
+                cfg.network.central.clients.forEach(element => {
+                    log("sending config to client: " + a.color("green", element), 5);
+                    post("https", element, "nfsense", "update",
+                        {
+                            key: cfg.network.central.key,
+                            speed: cfg.network.speed.mac, user, voucher, guest
+                        });
+                });
+            }
+        },
+        connect: function () {
+            log("contacting master", 5);
+            post("https", cfg.network.central.master, "nfsense", "reg", { key: cfg.network.central.key })
+        }
+    }
 }
 app = {
     nft: {
         create: function (flush) {
             nft = app.nft.command;
             state.gatewaySelected = undefined;
-
-
             cp.execSync('nft flush ruleset');
-             nft.cTable("filter", "output", "filter", "0", "accept");
+            nft.cTable("filter", "output", "filter", "0", "accept");
             if (cfg.firewall && cfg.firewall.self && cfg.firewall.self.length > 0) {
-                console.log("nftables  - flushing input chain");
+                log("flushing input chain", 1);
                 try { cp.execSync('nft flush chain ip filter input'); }
                 catch {
-                    console.log("nftables  - creating - filter input chain");
+                    log("creating - filter input chain", 1);
                     // cp.execSync('nft add chain ip filter input');
                     nft.cTable("filter", "input", "filter", "0", "drop");
                 }
@@ -569,10 +594,10 @@ app = {
                     nft.update("filter input", cfg.firewall.self[x].name, cfg.firewall.self[x].nft);
                 }
             }
-            console.log("nftables  - flushing forward chain");
+            log("flushing forward chain", 1);
             try { cp.execSync('nft flush chain ip filter forward'); }
             catch {
-                console.log("nftables  - creating - filter forward chain");
+                log("creating - filter forward chain", 1);
                 // cp.execSync('nft add chain ip filter forward');
                 nft.cTable("filter", "forward", "filter", "0", "drop");
             }
@@ -582,11 +607,11 @@ app = {
                 }
 
             if (flush !== false) {
-                console.log("nftables  - flushing all speed limiter tables");
+                log("flushing all speed limiter tables", 1);
                 cfg.network.speed.mac.forEach(element => { nft.flush("filter", element.name); });
                 arp = {};
             }
-            console.log("nftables  - flushing mangle chain");
+            log("flushing mangle chain", 1);
             try { cp.execSync('nft flush chain ip mangle prerouting'); }
             catch {
                 try { nft.cTable("mangle", "prerouting", "filter", "dstnat", "accept"); }
@@ -603,38 +628,62 @@ app = {
                 nft.add("filter forward", "speed_jump", "jump speed_limiter");
                 cp.execSync('nft add rule ip filter speed_limiter ct state new ip daddr 0.0.0.0/0 accept');
             } else {
-                console.log("nftables  - speed - setting no limiters");
+                log("speed - setting no limiters", 1);
                 nft.delete("filter forward", "speed_jump");
                 nft.add("filter forward", "speed_unrestricted", "ct state related,established ip daddr 0.0.0.0/0 accept");
             }
             if (cfg.network.speed.ip.length > 0) {
-                console.log("nftables  - speed - creating MAC limiters");
+                log("speed - creating MAC limiters", 1);
                 nft.speedIP();
+                /*
+                    "name": "Abba_nfSense",
+                        "range": [
+                            "172.16.0.1",
+                            "172.16.0.255"
+                        ]
+                    }
+                    "cidr": [
+                        "172.16.0.0",
+                        24
+                    ]
+                    "set": [
+                        "172.16.0.10",
+                        "172.16.0.11"
+                    ]
+                */
             }
             if (cfg.network.speed.mac[1] != undefined) {
-                console.log("nftables  - speed - creating MAC limiters");
+                log("speed - creating MAC limiters", 1);
                 nft.speedMAC();
             }
             if (cfg.service.portal.enabled) {
-                console.log("nftables  - setting up nat for portal");
+                log("setting up nat for portal");
                 if (flush !== false) {
+                    try { cp.execSync('nft flush chain ip nat prerouting'); } catch { createNat(); }
+                    cp.execSync('nft flush chain ip nat postrouting');
                     nft.flush("nat", "allow");
                     nft.flush("mangle", "allow");
-                    try { cp.execSync('nft flush chain ip nat prerouting'); }
-                    catch { createNat(); }
-                    cp.execSync('nft flush chain ip nat postrouting');
                 }
+                log("creating portal redirect nat", 1);
                 nft.update("nat prerouting", "nat_portal_redirect_dns", 'ip saddr != @allow udp dport 53 dnat to '
                     + cfg.network.interface[0].ip + ':52');
                 // nft.update("nat prerouting", "nat_portal_redirect_http", 'ip saddr != @allow tcp dport 80 dnat to '
                 //    + cfg.network.interface[0].ip + ':80');
                 // nft.update("nat prerouting", "nat_portal_redirect_https", 'ip saddr != @allow tcp dport 443 dnat to '
                 //     + cfg.network.interface[0].ip + ':443');
+                if (cfg.firewall && cfg.firewall.snat)
+                    for (let x = 0; x < cfg.firewall.snat.length; x++) {
+                        nft.update("nat postrouting", cfg.firewall.snat[x].name, cfg.firewall.snat[x].nft);
+                    }
                 nft.update('nat postrouting', 'masquerade', 'ip saddr @allow oif "'
                     + ((cfg.network.interface[1]) ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
             } else {
-                console.log("nftables  - creating outbound nat");
+                log("creating outbound nat", 1);
                 try { cp.execSync('nft flush chain ip nat prerouting'); } catch { createNat(); }
+                if (cfg.firewall && cfg.firewall.snat)
+                    for (let x = 0; x < cfg.firewall.snat.length; x++) {
+                        nft.update("nat postrouting", cfg.firewall.snat[x].name, cfg.firewall.snat[x].nft);
+                    }
                 nft.update("nat postrouting", "masquerade", 'ip saddr ' + cfg.network.interface[0].subnetCIDR[0] + '/'
                     + cfg.network.interface[0].subnetCIDR[1] + ' oif "' + ((cfg.network.interface[1])
                         ? cfg.network.interface[1].if : cfg.network.interface[0].if) + '" masquerade');
@@ -644,12 +693,9 @@ app = {
                     for (let x = 0; x < cfg.firewall.dnat.length; x++) {
                         nft.update("nat prerouting", cfg.firewall.dnat[x].name, cfg.firewall.dnat[x].nft);
                     }
-                if (cfg.firewall.snat)
-                    for (let x = 0; x < cfg.firewall.snat.length; x++) {
-                        nft.update("nat postrouting", cfg.firewall.snat[x].name, cfg.firewall.snat[x].nft);
-                    }
             }
             function createNat() {
+                log("creating nat table", 1);
                 cp.execSync('nft add table ip nat');
                 cp.execSync('nft add chain ip nat prerouting "{ type nat hook prerouting priority filter; policy accept; }"');
                 cp.execSync('nft add chain ip nat postrouting "{ type nat hook postrouting priority srcnat; policy accept; }"');
@@ -869,19 +915,19 @@ app = {
         },
         command: {
             cTable: function (table, chain, type, priority, policy) {
-                console.log("nftables  - creating table - " + table);
+                log("creating table - " + table, 1);
                 cp.execSync('nft add table ip ' + table);
-                console.log("nftables  - creating chain - " + table + " " + chain);
+                log("creating chain - " + table + " " + chain, 1);
                 cp.execSync('nft add chain ip ' + table + ' ' + chain + ' "{ type ' + type + ' hook '
                     + chain + ' priority ' + priority + '; policy ' + policy + '; }"');
             },
             flush: function (chain, name) {
                 try {
-                    console.log("nftables  - flushing set - " + chain + " - " + name);
+                    log("flushing set - " + chain + " - " + name, 1);
                     cp.execSync('nft flush set ip ' + chain + ' ' + name);
                 }
                 catch {
-                    console.log("nftables  - set not found, creating - " + chain + " - " + name);
+                    log("set not found, creating - " + chain + " - " + name, 1);
                     cp.execSync('nft add set ip ' + chain + ' ' + name + ' "{ type ipv4_addr; }"');
                 }
             },
@@ -889,9 +935,9 @@ app = {
                 let handleNum = Number(parse(cp.execSync('nft -a list chain ip ' + chain).toString()
                     , '"nfsense_' + name + '" # handle ', '\n'));
                 if (isNaN(handleNum)) {
-                    console.log("nftables  - cannot delete rule - " + chain + " - " + name + ' - rule not found');
+                    log("cannot delete rule - " + chain + " - " + name + ' - rule not found', 1);
                 } else {
-                    console.log("nftables  - deleting rule - " + chain + " - " + name);
+                    log("deleting rule - " + chain + " - " + name, 1);
                     cp.execSync('nft delete rule ip ' + chain + ' handle ' + handleNum);
                 }
             },
@@ -899,11 +945,11 @@ app = {
                 let handleNum = Number(parse(cp.execSync('nft -a list chain ip ' + chain).toString()
                     , '"nfsense_' + name + '" # handle ', '\n'));
                 if (isNaN(handleNum)) {
-                    console.log("nftables  - creating rule - " + chain + " - " + name);
+                    log("creating rule - " + chain + " - " + name, 1);
                     cp.execSync('nft ' + (insert ? 'insert' : 'add') + ' rule ip ' + chain + ' ' + rule + ' comment "nfsense_' + name + '"')
 
                 } else {
-                    console.log('nftables  - updating rule - ' + chain + ' - ' + name);
+                    log('updating rule - ' + chain + ' - ' + name, 1);
                     cp.execSync('nft replace rule ip ' + chain + ' handle ' + handleNum + ' ' + rule + ' comment "nfsense_' + name + '"');
                 }
             },
@@ -911,9 +957,9 @@ app = {
                 let handleNum = Number(parse(cp.execSync('nft -a list chain ip ' + chain).toString()
                     , '"nfsense_' + name + '" # handle ', '\n'));
                 if (isNaN(handleNum)) {
-                    console.log("nftables  - creating rule - " + chain + " - " + name);
+                    log("creating rule - " + chain + " - " + name, 1);
                     cp.execSync('nft add rule ip ' + chain + ' ' + rule + ' comment "nfsense_' + name + '"');
-                } else console.log("nftables  - creating rule aborted, exists already - " + chain + " - " + name);
+                } else log("creating rule aborted, exists already - " + chain + " - " + name, 1);
             },
             getHandle: function (chain, name) {
                 let handleNum = parse(cp.execSync('nft -a list chain ip ' + chain).toString()
@@ -1043,7 +1089,7 @@ app = {
                 for (let x = 0; x < cfg.network.speed.mac.length; x++) {
                     rule = cfg.network.speed.mac[x];
                     if (x != 0) {
-                        console.log("nftables  - creating MAC based speed limiter rule - " + rule.name);
+                        log("creating MAC based speed limiter rule - " + rule.name, 1);
                         buf.push({
                             add: {
                                 rule: {
@@ -1158,7 +1204,7 @@ app = {
                 for (let x = 0; x < cfg.network.speed.ip.length; x++) {
                     rule = cfg.network.speed.ip[x];
                     if (rule.up == undefined) {
-                        console.log("nftables  - creating IP based unrestricted upload speed limiter rule - " + rule.name);
+                        log("creating IP based unrestricted upload speed limiter rule - " + rule.name, 1);
                         buf.push({
                             add: {
                                 rule: {
@@ -1196,7 +1242,7 @@ app = {
                             }
                         })
                     } else {
-                        console.log("nftables  - creating IP based upload speed limiter rule - " + rule.name);
+                        log("creating IP based upload speed limiter rule - " + rule.name, 1);
                         buf.push({
                             rule: {
                                 family: "ip",
@@ -1247,7 +1293,7 @@ app = {
                         })
                     }
                     if (rule.down == undefined) {
-                        console.log("nftables  - creating IP based unrestricted download speed limiter rule - " + rule.name);
+                        log("creating IP based unrestricted download speed limiter rule - " + rule.name, 1);
                         buf.push({
                             add: {
                                 rule: {
@@ -1285,7 +1331,7 @@ app = {
                             }
                         })
                     } else {
-                        console.log("nftables  - creating IP based download speed limiter rule - " + rule.name);
+                        log("creating IP based download speed limiter rule - " + rule.name, 1);
                         buf.push({
                             rule: {
                                 family: "ip",
@@ -1348,7 +1394,7 @@ app = {
                 connectAll: function () {
                     for (let x = 0; x < cfg.vpn.wireguard.client.length; x++) {
                         if (cfg.vpn.wireguard.client[x].enabled) {
-                            console.log("WireGuard - connecting to site: " + cfg.vpn.wireguard.client[x].name);
+                            log("connecting to site: " + cfg.vpn.wireguard.client[x].name, 4);
                             this.service(cfg.vpn.wireguard.client[x], x);
                         }
                     }
@@ -1357,7 +1403,7 @@ app = {
                     state.wg.client[x] = state.wg.client[x] || { timerKeepAlive: null };
                     let clientState = state.wg.client[x];
                     clearInterval(clientState.timerKeepAlive);
-                    let fileName = path.app + "tmp/wg" + x + ".conf";
+                    let fileName = "/etc/wireguard/wg" + x + ".conf";
                     let buf = [
                         "[Interface]",
                         "PrivateKey = " + client.keyPrivate,
@@ -1370,25 +1416,24 @@ app = {
                     ]
                     fs.writeFileSync(fileName, buf.join("\n"));
                     try {
-                        console.log("\nWireguard - " + client.name + " - shutting down");
-                        console.log(cp.execSync("wg-quick down wg" + x).toString());
+                        log(client.name + " - shutting down " + cp.execSync("wg-quick down wg" + x).toString(), 4);
                         start();
                     }
                     catch (e) {
                         try { start(); } catch { cp.execSync("wg-quick down wg" + x).toString(); start(); }
-                        // console.log("\nWireguard - " + client.name + " - shutdown error: ", e.toString());
+                        // log(client.name + " - shutdown error: ", e.toString());
                     }
                     function start() {
                         setTimeout(() => {
-                            console.log("\nWireguard - " + client.name + " - client connecting");
+                            log(client.name + " - client connecting", 4);
                             try {
-                                console.log("\nWireguard - " + client.name + " - successfully connected: "
-                                    , cp.execSync("wg-quick up " + fileName).toString());
-                                console.log(cp.execSync("wg show").toString());
+                                log(client.name + " - successfully connected: \n"
+                                    + cp.execSync("wg-quick up " + fileName).toString()
+                                    + cp.execSync("wg show").toString(), 4);
                             }
-                            catch (e) { console.log("\nWireguard - " + client.name + " - connection error: ", e.toString()) }
+                            catch (e) { log(client.name + " - connection error: " + e.toString(), 4) }
                             setTimeout(() => {
-                                console.log("\nWireguard - " + client.name + " - starting keepalive");
+                                log(client.name + " - starting keepalive", 4);
                                 keepAlive();
                             }, 5e3);
                         }, 1e3);
@@ -1397,17 +1442,17 @@ app = {
                         clientState.timerKeepAlive = setInterval(() => {
                             spawn("ping", ["-c 1", client.keepaliveAddress, "-W 2"], undefined, (data, object) => {
                                 if (!data.includes("64 bytes from")) {
-                                    console.log("WireGuard - client " + client.name + " dropped a packet, inspecting connection");
+                                    log("client " + client.name + " dropped a packet, inspecting connection", 4);
                                     spawn("ping", ["-c 4", client.keepaliveAddress, "-W 2", "-i .2"], undefined, (data, object) => {
                                         let loss = Number(parse(data, " received, ", "%"));
                                         if (loss == 100) {
-                                            console.log("WireGuard - client " + client.name + " - packet loss is " + loss + " - resetting connection");
+                                            log("client " + client.name + " - packet loss is " + loss + " - resetting connection", 4);
                                             setTimeout(() => { app.vpn.wireguard.client.service(client, x); }, (client.reconnect * 1e3));
                                             clearInterval(clientState.timerKeepAlive);
-                                        } else console.log("WireGuard - client " + client.name + " - network degraded - packet loss is " + loss);
+                                        } else log("client " + client.name + " - network degraded - packet loss is " + loss, 4);
                                     });
                                 }
-                                //  console.log(Number(parse(data, " received, ", "%")))
+                                //  log(Number(parse(data, " received, ", "%")))
                             });
                         }, (client.keepalive * 1e3));
                     }
@@ -1417,8 +1462,8 @@ app = {
                 for (let x = 0; x < cfg.vpn.wireguard.server.length; x++) {
                     let server = cfg.vpn.wireguard.server[x];
                     if (server.enabled) {
-                        console.log("WireGuard - starting server: " + cfg.vpn.wireguard.server[x].name);
-                        let fileName = path.app + "tmp/wg" + (x + 1000) + ".conf";
+                        log("starting server: " + cfg.vpn.wireguard.server[x].name, 4);
+                        let fileName = "/etc/wireguard/wg" + (x + 1000) + ".conf";
                         let buf = [
                             "[Interface]",
                             "ListenPort = " + server.port,
@@ -1432,23 +1477,22 @@ app = {
                         }
                         fs.writeFileSync(fileName, buf.join("\n"));
                         try {
-                            console.log("\nWireguard - " + server.name + " - shutting down");
-                            console.log(cp.execSync("wg-quick down wg" + (x + 1000)).toString());
+                            log(server.name + " - shutting down\n " + cp.execSync("wg-quick down wg" + (x + 1000)).toString(), 4);
                             start();
                         }
                         catch (e) {
                             try { start(); } catch { cp.execSync("wg-quick down wg" + (x + 1000)).toString(); start(); }
-                            // console.log("\nWireguard - " + server.name + " - shutdown error: ", e.toString());
+                            // log(server.name + " - shutdown error: ", e.toString(),4);
                         }
                         function start() {
                             setTimeout(() => {
-                                console.log("\nWireguard - " + server.name + " - server connecting");
+                                log(server.name + " - server connecting", 4);
                                 try {
-                                    console.log("\nWireguard - " + server.name + " - successfully connected: "
-                                        , cp.execSync("wg-quick up " + fileName).toString());
-                                    console.log(cp.execSync("wg show").toString());
+                                    log(server.name + " - successfully connected: \n"
+                                        + cp.execSync("wg-quick up " + fileName).toString() + "\n"
+                                        + cp.execSync("wg show").toString(), 4);
                                 }
-                                catch (e) { console.log("\nWireguard - " + server.name + " - connection error: ", e.toString()) }
+                                catch (e) { log(server.name + " - connection error: " + e.toString(), 4) }
                             }, 1e3);
                         }
                     }
@@ -1471,7 +1515,7 @@ app = {
     },
     pingMulti: function (address, count, result, step) {
         spawn("ping", ["-c " + count, address, "-W 2"], undefined, (data, object) => {
-            console.log(Number(parse(data, " received, ", "%")))
+            log(Number(parse(data, " received, ", "%")))
         }, { result, step });
     },
     systemInfo: async function () {
@@ -1560,7 +1604,7 @@ app = {
             let buf = { add: {}, delete: {} };
             fs.readFile("/proc/net/arp", 'utf8', (err, data) => {
                 if (err) {
-                    console.error('Failed to read /proc/net/arp:', err);
+                    log('Failed to read /proc/net/arp: ' + err, 3);
                     return;
                 }
                 const newArpTable = parseArpTable(data);
@@ -1573,7 +1617,7 @@ app = {
                             if (user[mac]) {
                                 findUser(mac, changes.added[mac].ip, buf.add);
                             } else if (guest[mac]) {
-                                //   console.log("ARP       - returning guest session - MAC: ", mac, ", with IP: ", changes.added[mac].ip);
+                                //   log("returning guest session - MAC: ", mac, ", with IP: ", changes.added[mac].ip);
                                 guest[mac].update = time.epoch;
                                 if (buf.add.guest == undefined) buf.add.guest = { ip: [] };
                                 buf.add.guest.ip.push(changes.added[mac].ip);
@@ -1581,7 +1625,7 @@ app = {
                         } else { findUser(mac, changes.added[mac].ip, buf.add); }
                         for (const code in voucher) {
                             if (voucher[code] != undefined && voucher[code].mac != undefined && voucher[code].mac == mac) {
-                                console.log("vouchers - resuming session - code: " + code + ", for mac: ", mac, ", with IP: ", changes.added[mac].ip);
+                                log("(ARP) - resuming session - code: " + code + ", for mac: ", mac, ", with IP: ", changes.added[mac].ip, 6);
                                 voucher[code].ip = changes.added[mac].ip;
                                 voucher[code].update = time.epoch;
                                 if (buf.add[voucher[code].speed] == undefined) buf.add[voucher[code].speed] = { ip: [] };
@@ -1626,7 +1670,8 @@ app = {
             function findUser(mac, ip, tbuf) {
                 let speed;  // make an object array for each speed profile
                 if (user != undefined && user[mac] != undefined) {
-                    console.log("ARP       - urestricted user connection - mac: ", mac, " - ip: ", ip, user[mac]);
+                    log("urestricted user connection - mac: " + a.color("green", mac) + " - ip: "
+                        + a.color("green", ip) + " name: " + a.color("green", user[mac].name), 8);
                     speed = cfg.network.speed.mac[user[mac].speed].name;
                 } else if (guest != undefined && guest[mac] != undefined) {
                     if (cfg.network.speed.mac.some(obj => obj.name === "guest")) speed = "guest";
@@ -1643,7 +1688,7 @@ app = {
         function nftUpdate(type, object) {
             for (const speed in object) {
                 let buf = "";
-                if (cfg.log.arp) console.log("nftables  - " + type + " IPs: ", object[speed].ip, " for speed class ", speed);
+                if (cfg.log.arp) log("" + type + " IPs: " + a.color("green", object[speed].ip) + " for speed class " + speed, 8);
                 buf += " nft " + type + " element ip filter " + speed + " { " + object[speed].ip + " }";
                 if (cfg.service.portal.enabled) {
                     if (cfg.network.gateway.mode == "teaming")
@@ -1654,33 +1699,33 @@ app = {
                     if (e) {
                         //  console.log(e);
                         if (e.message.includes("Command failed:  nft add element ip")) {
-                            console.log("ARP       - flushing NF and ARP tables");
+                            log("flushing NF and ARP tables", 8);
                             app.nft.create(true);
                             script.mangle();
                             state.tableFlushes++;
                             arp = {};
                         } else {
                             state.tableRemovalFail++;
-                            console.log("ARP       - bulk ip address removal failed");
+                            log("bulk ip address removal failed", 8);
                             const regex = /element ip filter (\S+) \{([^}]*)\}/;
                             const match = e.message.match(regex);
                             if (match && match[1] && match[2]) {
                                 const elementName = match[1]; // Capture the element name (e.g., "global")
                                 const ipAddresses = match[2].split(",").map((ip) => ip.trim()); // Extract and trim IPs
-                                console.log(`Retrying for element "${elementName}" with individual IP addresses:`, ipAddresses);
+                                log(`Retrying for element "${elementName}" with individual IP addresses:` + JSON.stringify(ipAddresses), 8);
                                 // Retry the command for each individual IP address
                                 ipAddresses.forEach((ip) => {
                                     const retryCommand = `nft delete element ip filter ${elementName} { ${ip} }`;
                                     cp.exec(retryCommand, (err, out, errOut) => {
                                         if (err) {
-                                            console.error(`Failed for IP ${ip} in element "${elementName}":`, err.message);
+                                            log(`Failed for IP ${ip} in element "${elementName}":` + err.message, 3);
                                         } else {
-                                            console.log(`Success for IP ${ip} in element "${elementName}"`);
+                                            log(`Success for IP ${ip} in element "${elementName}"`, 8);
                                         }
                                     });
                                 });
                             } else {
-                                console.error("No element name or IP addresses found in the error message.");
+                                log("No element name or IP addresses found in the error message.", 8, 3);
                             }
                         }
                     }
@@ -1754,7 +1799,6 @@ server = {
             res.sendFile(require('path').join(__dirname, "/monitor/monitor.html"));
         });
         webPublic.get('/data', (req, res) => {
-
             res.json(Array.from({ length: stat_nv.conntrack.length }, (_, i) => ({ x: i, y: stat_nv.conntrack[i] })));
         });
         webAdmin.get('/admin', (req, res) => {
@@ -1787,9 +1831,56 @@ server = {
         webAdmin.get('/logout', (req, res) => {
             client = req.ip || req.connection.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - web client logout - ' + clientIp);
+            log('web client logout - ', a.color("green", clientIp), 3);
             res.setHeader('WWW-Authenticate', 'Basic realm="Secure Area"');
             return res.status(401).send('Logged out.');
+        });
+        webSecure.use(express.json());
+        webSecure.post('/', (req, res) => {
+            let obj, ip = ipSort(req);
+            obj = req.body;
+            switch (req.query.type) {
+                case "nfsense":
+                    switch (req.query.class) {
+                        case "reg":
+                            if (obj && obj.key == cfg.network.central.key) {
+                                log("client " + a.color("green", ip) + " is registering", 5);
+                                post("https", ip, "nfsense", "update",
+                                    {
+                                        key: cfg.network.central.key,
+                                        speed: cfg.network.speed.mac, user, voucher, guest
+                                    });
+                            }
+                            break;
+                        case "update":
+                            if (obj && obj.key == cfg.network.central.key) {
+                                log("master: " + a.color("green", ip) + ", is sending update ", 5);
+                                cfg.network.speed.mac = obj.speed;
+                                user = obj.user;
+                                voucher = obj.voucher;
+                                guest = obj.guest;
+                                log(user);
+                            }
+                            break;
+                    }
+                    break;
+            }
+        })
+        webSecure.get('/', (req, res) => {
+            try { obj = JSON.parse(req.headers.authorization) } catch (err) { }
+            switch (req.query.type) {
+                case "nfsense":
+                    switch (req.query.class) {
+                        case "register":
+
+                            if (obj && obj == cfg.network.central.key) {
+                                log("client " + clientIp + " is registering", 5);
+                                res.json({ speed: cfg.network.speed.mac, user, voucher, guest });
+                            }
+                            break;
+                    }
+                    break;
+            }
         });
         web.get('/admin', (req, res) => {
             res.sendFile(require('path').join(__dirname, '/public/index.html'));
@@ -1797,13 +1888,13 @@ server = {
         web.get('/portal', (req, res) => {
             client = req.ip || req.connection.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            //   console.log('webserver - web client accessing portal - ' + clientIp);
+            //   log('web client accessing portal - ' + clientIp,3);
             res.sendFile(require('path').join(__dirname, "/public/portal.html"));
         });
         web.get('/welcome', (req, res) => {
             client = req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - web client accessing portal - ' + clientIp);
+            log('web client accessing portal - ' + a.color("green", clientIp), 3);
             res.sendFile(require('path').join(__dirname, "/public/welcome.html"));
         });
         web.post('/voucher', (req, res) => {
@@ -1816,7 +1907,7 @@ server = {
             if (script.voucher.use(code, clientMac)) {
                 res.status(200).json({ success: true, redirectUrl: "http://" + cfg.network.interface[0].ip + "/welcome" });
             } else {
-                console.log("portal    - voucher valifdation failed, code: ", code);
+                log("voucher valifdation failed, code: " + a.color("green", code), 9);
                 res.json({ success: false });
             }
         });
@@ -1829,29 +1920,29 @@ server = {
                 if (clientIp == arp[mac].ip) clientMac = mac;
             if (guest[clientMac]) {
                 if (guest[clientMac].lockout == true) {
-                    console.log("portal    - free internet request deliend - lockout - from: ", guest[clientMac]);
+                    log("free internet request declined - lockout - from: " + a.color("green", guest[clientMac]), 9);
                     res.json({ success: "lockout", duration: (config.lockoutPeriod - ((time.epoch - guest[clientMac].update)) / 60) });
                     return;
                 }
             } else {
                 guest[clientMac] = { ip: clientIp, activated: time.epoch, update: time.epoch };
-                console.log("portal    - free internet request from: ", { mac: clientMac, ip: clientIp });
+                log("free internet request from: " + a.color("green", JSON.stringify({ mac: clientMac, ip: clientIp })), 9);
                 let buf = "";
                 for (let x = 0; x < cfg.network.speed.mac.length; x++) {
                     if (cfg.network.speed.mac[x].name == "guest") {
-                        //     console.log("portal    - adding guest to guest speed limiter");
+                        //     log("portal    - adding guest to guest speed limiter",9);
                         buf += " nft add element ip filter guest { " + clientIp + " } ";
                         break;
                     }
                 }
                 if (cfg.network.gateway.mode == "teaming") {
-                    //     console.log("portal    - adding guest to mangle allow list");
+                    //     log("portal    - adding guest to mangle allow list",9);
                     buf += " ; nft add element ip mangle allow { " + clientIp + " }";
                 }
-                // console.log("portal    - adding guest to NAT allow list");
+                // log("portal    - adding guest to NAT allow list",9);
                 buf += " ; nft add element ip nat allow { " + clientIp + " }";
                 // console.log(buf)
-                cp.exec(buf, (e) => { if (e) console.log(e) });
+                cp.exec(buf, (e) => { if (e) log(e) });
                 res.status(200).json({ success: true, redirectUrl: "http://" + cfg.network.interface[0].ip + "/welcome" });
                 file.write("guest");
             }
@@ -1864,7 +1955,7 @@ server = {
                 if (clientIp == arp[mac].ip) clientMac = mac;
 
 
-            console.log('portal    - Help message received for IP: ' + clientIp + ", MAC: " + clientMac + " - ", req.body);
+            log('elp message received for IP: ' + clientIp + ", MAC: " + clientMac + " - " + a.color("green", req.body), 9);
             let message = req.body.message;
             if (message.includes("mac") || message.includes("Mac") || message.includes("MAC")) {
                 for (let x = 0; x < cfg.service.telegram.admins.length; x++) {
@@ -1899,33 +1990,33 @@ server = {
             if (host === "admin." + cfg.service.dns.localDomain
                 //  || host === cfg.service.dns.localDomain
             ) {
-                // console.log('webserver - web client - ' + clientIp + " - requesting host: "
-                //     , host, " forwarding to portal");
+                // log('web client - ' + clientIp + " - requesting host: "
+                //     , host, " forwarding to portal",5);
                 return res.redirect(302, "https://" + cfg.service.dns.localDomain + ":82/admin");
             }
             for (let x = 0; x < cfg.service.web.redirect.length; x++) {
                 redirect = cfg.service.web.redirect[x];
                 if (x == 0) {
-                    /////////////  console.log("host request: " + host)
+                    /////////////  log("host request: " + host,5)
                     if (redirect.target
                         == "change only the target if you dont want portal as the default forward - otherwise leave this string") {
                         if (host === cfg.service.dns.localDomain
                             || host == "connectivitycheck.gstatic.com"
                             || host == "www.google.com") {
-                            //    console.log("host redirect: " + host)
-                            //   console.log('webserver - web client - ' + clientIp + " - requesting host: "
-                            //     , host, " forwarding to admin portal - from redirect list");
+                            //    log("host redirect: " + host,5)
+                            //   log('web client - ' + clientIp + " - requesting host: " +
+                            //     a.color("green", host) + " forwarding to admin portal - from redirect list",5);
                             return res.redirect(302, "http://" + cfg.network.interface[cfg.service.portal.interface].ip + "/portal");
                         }
                     }
                 }
                 if (host === redirect.host) {
-                    //     console.log('webserver - web client - ' + clientIp + " - requesting host: "
+                    //     log('web client - ' + clientIp + " - requesting host: "
                     //         , host, " forwarding to: " + redirect.target);
                     return res.redirect(302, redirect.target);
                 }
             }
-            // console.log('webserver - web client - ' + clientIp + " - requesting host: "
+            // log('web client - ' + clientIp + " - requesting host: "
             //     , host, " forwarding to: " + "http://" + cfg.network.interface[cfg.service.portal.interface].ip + "/portal");
             return res.redirect(302, "http://" + cfg.network.interface[cfg.service.portal.interface].ip + "/portal");
             // return res.redirect(302, "http://" + cfg.network.interface[0].ip + "/portal");
@@ -1933,7 +2024,7 @@ server = {
         wssPublic.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - websocket client connected - ' + clientIp);
+            log('websocket client connected - ' + a.color("green", clientIp), 5);
             setInterval(() => {
                 ws.send(JSON.stringify({
                     stat,
@@ -1950,14 +2041,14 @@ server = {
         wss.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - websocket client connected - ' + clientIp);
+            log('websocket client connected - ' + clientIp, 5);
             setInterval(() => { ws.send(JSON.stringify(wsObject())); }, 1e3);
             ws.send(JSON.stringify({ cfg }));
         });
         swss.on('connection', (ws, req) => {
             client = req.socket.remoteAddress
             const clientIp = client.substring(client.lastIndexOf(":") + 1);
-            console.log('webserver - secure websocket client connected - ' + clientIp);
+            log('secure websocket client connected - ' + clientIp, 5);
             setInterval(() => { ws.send(JSON.stringify(wsObject())); }, 1e3);
             ws.send(JSON.stringify({ cfg }));
         });
@@ -1981,13 +2072,17 @@ server = {
             return res.status(401).send('Invalid credentials.');
         };
         webAdmin.use(basicAuth);
+        function ipSort(req) {
+            const client = req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress
+            return client.substring(client.lastIndexOf(":") + 1);
+        }
     },
     telegram: function () {
         const userState = {};
-        bot.on('polling_error', (error) => { /* console.error('Polling Error:'); */ });
-        bot.on('webhook_error', (error) => { /*  console.error('Webhook Error:'); */ });
-        process.on('unhandledRejection', (reason, promise) => { /*console.error('Unhandled Rejection: (Telegram)'); */ });
-        process.on('uncaughtException', (error) => { console.error('Uncaught Exception: (Telegram)'); });
+        bot.on('polling_error', (error) => { /* log('Polling Error:',3); */ });
+        bot.on('webhook_error', (error) => { /*  log('Webhook Error:',3; */ });
+        process.on('unhandledRejection', (reason, promise) => { /*log('Unhandled Rejection: (Telegram)',3); */ });
+        process.on('uncaughtException', (error) => { log('Uncaught Exception: (Telegram)', 3); });
         bot.setMyCommands([
             { command: '/vouchers', description: 'Create Wouchers' },
             { command: '/permanent_add', description: 'Permanent Add' },
@@ -1995,7 +2090,7 @@ server = {
             { command: '/dhcp_add', description: 'DHCP Static Add' },
             { command: '/dhcp_delete', description: 'DHCP Static Delete' },
         ]).then(() => {
-            console.log('telegram  - channel commands have been set');
+            log('channel commands have been set', 10);
         });
         bot.onText(/\/vouchers/, (msg) => {
             const chatId = msg.chat.id;
@@ -2027,7 +2122,7 @@ server = {
             bot.sendMessage(chatId, 'Deletion Method', buf);
         });
         bot.on('message', (msg) => {
-            //  console.log(msg)
+            //  log(msg)
             let chatId = msg.chat.id;
             if (!userState[chatId]) return;
             let userInput = msg.text;
@@ -2055,7 +2150,7 @@ server = {
                             callback_data: x
                         }]);
                     }
-                    //   console.log(speedOptions)
+                    //   log(speedOptions)
                     bot.sendMessage(chatId, 'Select speed profile for vouchers:', speedOptions);
                     break;
                 case 'askName':
@@ -2131,9 +2226,10 @@ server = {
                     if (userState[chatId].macAddress) {  // This is for `/permanent_add`
                         const { name, macAddress } = userState[chatId];
                         const selectedSpeed = cfg.network.speed.mac[data];
-                        console.log("telegram - adding permanant MAC: " + macAddress);
+                        log("telegram - adding permanant MAC: " + a.color("green", macAddress), 10);
                         user[macAddress] = { name, speed: data, added: time.epoch };
                         file.write("user");
+                        script.central.update();
                         bot.sendMessage(chatId, `Permanent entry added:\nName: ${name}\nMAC: ${macAddress}\nSpeed: ${selectedSpeed.name}`);
                         app.nft.create();
                     } else if (userState[chatId].quantity && userState[chatId].duration) { // This is for `/vouchers`
@@ -2142,13 +2238,13 @@ server = {
                         let codes = [];
                         for (let code in vouchers) codes.push(code);
                         const codelist = codes.join("\n");
-                        //  console.log(codelist);
+                        //  log(codelist);
                         bot.sendMessage(chatId, `New Vouchers:\n${codelist}`);
                     }
                     delete userState[chatId]; // Reset state
                     break;
                 case 'ask_permanent_delete_method':
-                    // console.log("data was: ", callbackQuery)
+                    // log("data was: ", callbackQuery)
                     if (data == 'enter_mac') {
                         userState[chatId].method = "delete";
                         userState[chatId].step = 'askMacAddress';
@@ -2156,7 +2252,7 @@ server = {
                     }
                     if (data == 'list_mac') {
                         let buf = { reply_markup: { inline_keyboard: [] } };
-                        //  console.log(user)
+                        //  log(user)
                         for (const mac in user) {
                             buf.reply_markup.inline_keyboard.push([{
                                 text: user[mac].name + " - " + mac,
@@ -2168,11 +2264,12 @@ server = {
                     }
                     break;
                 case "ask_permanent_delete":
-                    //   console.log("data was: ", data)
+                    //   log("data was: ", data)
                     bot.sendMessage(chatId, 'Deleting permanant MAC address: ' + data);
                     delete user[data];
                     app.nft.create();
                     file.write("user");
+                    script.central.update();
                     break;
                 default:
                     bot.answerCallbackQuery(callbackQuery.id, { text: 'Unexpected input.' });
@@ -2181,13 +2278,13 @@ server = {
         });
     },
     dhcp: function () {
-        console.log("system    - starting DHCP server...")
+        log("starting DHCP server...")
         let buffer = '';
         let bufLog = [], logNum = 0;
         serviceConfig();
         service.dhcp = cp.spawn('dhcpd', ['-4', '-f', '-cf', '/etc/dhcp/dhcpd.conf']);
         service.dhcp.stdout.on('data', (chunk) => {
-            //////////  console.log("NORMAL DADAT: " + data)
+            //////////  log("NORMAL DADAT: " + data)
         });
         service.dhcp.stderr.on('data', (chunk) => {
             bufLog[logNum] = chunk.toString();
@@ -2196,15 +2293,15 @@ server = {
             /* process(chunk);*/
         });
         service.dhcp.on('close', (code) => {
-            console.log("system    - dhcpd exited with code: " + code + ", restarting...");
+            log("dhcpd exited with code: " + code + ", restarting...");
             console.log(bufLog);
             setTimeout(() => { server.dhcp(); }, 3e3);
             cp.exec("killall -9 dhcpd");
-            if (buffer.length > 0) console.log('system    - Final incomplete line:', buffer);
+            if (buffer.length > 0) log('Final incomplete line:', buffer);
         });
         function process(chunk) {
             buffer += chunk.toString();
-            //    console.log(buffer);
+            //    log(buffer);
             let lines = buffer.split('\n');
             buffer = lines.pop();
             for (const line of lines) {
@@ -2217,11 +2314,11 @@ server = {
                     }
                     for (let x = 0; x < state.dhcp.entries.length; x++)
                         if (state.dhcp.entries[x].mac == reg.mac) {
-                            //  console.log("mac already added"); 
+                            //  log("mac already added"); 
                             found = true; break;
                         }
                     if (!found) {
-                        //   console.log("New DCHP, entry: " + state.dhcp.entriesLastPos + " Reg:", reg)
+                        //   log("New DCHP, entry: " + state.dhcp.entriesLastPos + " Reg:", reg)
                         state.dhcp.entries.push(reg);
                         state.dhcp.entriesLast[state.dhcp.entriesLastPos] = reg;
                         if (state.dhcp.entriesLastPos < 19) state.dhcp.entriesLastPos++;
@@ -2265,13 +2362,13 @@ server = {
         }
     },
     dnsMasq: function () {  // not in use
-        console.log("system    - starting DNS server...")
+        log("starting DNS server...")
         serviceConfig();
         service.dns = cp.spawn('dnsmasq', ['-d', '-C', path.app + '/tmp/dnsmasq.conf']);
-        service.dns.stdout.on('data', (data) => { console.log("NORMAL DADA: " + data) });
-        service.dns.stderr.on('data', (data) => { console.log("DNS Server: " + data.toString()) });
+        service.dns.stdout.on('data', (data) => { log("NORMAL DADA: " + data) });
+        service.dns.stderr.on('data', (data) => { log("DNS Server: " + data.toString()) });
         service.dns.on('close', (code) => {
-            console.log("system    - DNSMasq exited with code: " + code + ", restarting...");
+            log("DNSMasq exited with code: " + code + ", restarting...");
             setTimeout(() => { server.dnsMasq(); }, 3e3);
             cp.exec("killall -9 dnsmasq");
         });
@@ -2290,18 +2387,18 @@ server = {
             if (param.cacheNegative) { buf.push('neg-ttl=' + param.cacheTTLneg) }
             else { buf.push('no-negcache') }
             param.forwarders.forEach(element => { buf.push('server=' + element); });
-            //console.log("DNS Service Config: ", buf);
+            //log("DNS Service Config: ", buf);
             fs.writeFileSync(path.app + "/tmp/dnsmasq.conf", buf.join("\n"));
         }
     },
     dnsBind9: function () {
-        console.log("system    - starting Bind 9 DNS server...")
+        log("starting Bind 9 DNS server...")
         serviceConfig();
         service.dns9 = cp.spawn('named', ['-f', '-c', '/etc/bind/named.conf']);
-        service.dns9.stdout.on('data', (data) => { console.log("NORMAL DADA: " + data.toString()) });
-        service.dns9.stderr.on('data', (data) => { console.log("DNS Server: " + data.toString()) });
+        service.dns9.stdout.on('data', (data) => { log("NORMAL DADA: " + data.toString()) });
+        service.dns9.stderr.on('data', (data) => { log("DNS Server: " + data.toString()) });
         service.dns9.on('close', (code, data) => {
-            console.log("system    - Bind9 exited with code: " + code + ", restarting...");
+            log("Bind9 exited with code: " + code + ", restarting...");
             setTimeout(() => { server.dnsBind9(); }, 3e3);
             cp.exec("killall -9 dnsmasq");
         });
@@ -2335,7 +2432,7 @@ server = {
             for (let x = 0; x < cfg.service.dns.zones.length; x++) {
                 let zone = cfg.service.dns.zones[x];
                 let global = cfg.service.dns.global;
-                console.log("DNS       - creating zone for - " + zone.domain);
+                log("creating zone for - " + zone.domain);
                 let bufZone = [
                     "$TTL\t" + global.ttlS,
                     "@\tIN\tSOA\t" + zone.nameServer + " admin." + zone.domain + ". (",
@@ -2344,7 +2441,7 @@ server = {
                     "\t\t\t" + global.retry + " ; Retry",
                     "\t\t\t" + global.expire + " ; Expire",
                     "\t\t\t" + global.ttlMin + " ) ; Minimum TTL",
-                    "\tIN\tNS\t" + zone.nameServer + ".",
+                    "\tIN\tNS\t" + zone.nameServer,
                 ]
                 for (let y = 0; y < cfg.service.dns.zones[x].records.length; y++) {
                     record = cfg.service.dns.zones[x].records[y];
@@ -2359,13 +2456,13 @@ server = {
         }
     },
     dnsBind9Portal: function () {
-        console.log("system    - starting Portal DNS server...")
+        log("starting Portal DNS server...")
         serviceConfig();
         service.dnsPortal = cp.spawn('named', ['-f', '-c', "/etc/bind/named.conf.local"]);
-        service.dnsPortal.stdout.on('data', (chunk) => { console.log("NORMAL DATA: " + data) });
-        service.dnsPortal.stderr.on('data', (chunk) => { console.log(chunk.toString()); });
+        service.dnsPortal.stdout.on('data', (chunk) => { log("NORMAL DATA: " + data) });
+        service.dnsPortal.stderr.on('data', (chunk) => { log(chunk.toString()); });
         service.dnsPortal.on('close', (code) => {
-            console.log("system    - DNSMasq (Portal) exited with code: " + code + ", restarting...");
+            log("DNSMasq (Portal) exited with code: " + code + ", restarting...");
             setTimeout(() => { server.dnsBind9Portal(); }, 3e3);
             cp.exec("killall -9 named");
         });
@@ -2406,13 +2503,13 @@ server = {
         }
     },
     dnsMasqPortal: function () {
-        console.log("system    - starting Portal DNS server...")
+        log("starting Portal DNS server...")
         serviceConfig();
         service.dnsPortal = cp.spawn('dnsmasq', ['-d', '-C', path.app + '/tmp/dnsmasq-portal.conf']);
-        service.dnsPortal.stdout.on('data', (chunk) => { console.log("NORMAL DADA: " + data) });
+        service.dnsPortal.stdout.on('data', (chunk) => { log("NORMAL DADA: " + data) });
         service.dnsPortal.stderr.on('data', (chunk) => {/* process(chunk);*/ });
         service.dnsPortal.on('close', (code) => {
-            console.log("system    - DNSMasq (Portal) exited with code: " + code + ", restarting...");
+            log("DNSMasq (Portal) exited with code: " + code + ", restarting...");
             setTimeout(() => { server.dnsMasqPortal(); }, 3e3);
             cp.exec("killall -9 dnsmasq");
         });
@@ -2423,7 +2520,7 @@ server = {
                 'address=/#/' + cfg.network.interface[0].ip,
                 'port=' + 52,
             ];
-            console.log("DNS       - Service (portal) Config: ", buf);
+            log("DNS       - Service (portal) Config: ", buf);
             fs.writeFileSync(path.app + "/tmp/dnsmasq-portal.conf", buf.join("\n"));
         }
     },
@@ -2434,7 +2531,7 @@ sys = {
         file.read("cfg"); // config data must be read before init
         sys.checkArgs();
         sys.init();
-        console.log("system    - booting...");
+        log("booting...");
         //    send("telegram", "notif", { msg: "nfSense system starting" })
         libLate();
         file.read("voucher");
@@ -2447,6 +2544,11 @@ sys = {
         server.web();
         script.checkRoutes();
         app.nft.create();
+
+        if (cfg.network.central) {
+            if (cfg.network.central.master) { setTimeout(() => script.central.connect(), 3e3); }
+            if (cfg.network.central.clients != undefined) setTimeout(() => script.central.update(), 5e3);
+        }
         //  if (cfg.network.gateway.startAll) script.mangle();
         if (cfg.service.dhcp.enabled) { server.dhcp(); app.getDHCP(); }
         if (cfg.service.dns.enabled) server.dnsBind9();
@@ -2457,7 +2559,7 @@ sys = {
 
         app.getConGateways(true);
         if (cfg.service.portal.enabled || cfg.network.speed.mac.length > 0) {
-            console.log("system    - starting ARP tracker")
+            log("starting ARP tracker")
             app.getArp(cfg.network.interface[0].if);
         }
         if (cfg.monitor.lan.enable) script.pingLan();
@@ -2470,7 +2572,7 @@ sys = {
             fs.stat('/etc/nftables.conf', (err, stats) => {
                 if (state.nfTables.modify == undefined) state.nfTables.modify = stats.mtimeMs;
                 else if (state.nfTables.modify != stats.mtimeMs) {
-                    console.log("nftables  - rules have been modified - recreating tables...");
+                    log("rules have been modified - recreating tables...", 1);
                     state.nfTables.modify = stats.mtimeMs;
                     setTimeout(() => { app.nft.create(true); }, 5e3);
                 }
@@ -2484,7 +2586,7 @@ sys = {
             script.getStat();
         }, 60e3);
         if (cfg.network.gateway.mode == "teaming") setInterval(() => { app.getConGateways(); }, 300e3);
-        console.log("system    - setting network timeouts");
+        log("setting network timeouts");
         cp.execSync("echo " + cfg.network.arpTimeout + " > /proc/sys/net/ipv4/neigh/default/gc_stale_time");
         cp.execSync("sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=" + cfg.network.socketTimeout);
     },
@@ -2492,6 +2594,7 @@ sys = {
         service = {};
         arp = {};
         spawnC = [];
+
         stat = {
             cpu: [],
             bw: [],
@@ -2525,20 +2628,10 @@ sys = {
                 mangle: undefined,  // mangle rule handle number
                 modify: undefined,  // track modify times
             },
-            conntrack: {
-                totalMin: [],
-            },
-            dhcp: {
-                entries: [],
-                entriesLast: [],
-                entriesLastPos: 0,
-            },
+            conntrack: { totalMin: [], },
+            dhcp: { entries: [], entriesLast: [], entriesLastPos: 0, },
             fileTimer: {},
-            wg: {
-                client: [
-
-                ]
-            }
+            wg: { client: [] }
         }
         for (let x = 0; x < cfg.network.interface.length; x++) {
             stat.bw.push([]);
@@ -2565,6 +2658,7 @@ sys = {
         try { cp.execSync("mkdir " + path.app + "/tmp", { stdio: ['ignore', 'ignore', 'ignore'] }) } catch (e) { }
     },
     lib: function () {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
         os = require('os');
         cp = require('child_process');
         fs = require('fs');
@@ -2613,6 +2707,306 @@ sys = {
                 syncAndSchedule();
             },
         };
+        a = {         // ascii functions
+            bold: 0,        // ascii flag
+            blink: 1,       // ascii flag
+            underline: 2,   // ascii flag
+            row: 0,
+            gap: 0,
+            pos: function (column, row) {
+                let buf;
+                if (row == undefined) buf = ('\x1b[' + a.row + ';' + column + 'H');
+                else if (row == 0) {
+                    buf = ('\x1b[' + a.row + ';' + column + 'H'); a.row += a.gap;
+                } else { a.row = row; buf = ('\x1b[' + a.row + ';' + column + 'H'); }
+                return buf;
+            },
+            color: function (color, input, ...option) {
+                if (input === false) return '\x1b[37;m';        // end color
+                if (input == undefined) input = '';
+                let op = "", bold = "";
+                if (color == 'black') bold = 'm';
+                else bold = ';1m'
+                for (let x = 0; x < option.length; x++) {
+                    if (option[x] == 0 && color != "black") bold = 'm';     // bold
+                    if (option[x] == 0 && color == "black") bold = ';1m';   // bold
+                    if (option[x] == 1) op = '\x1b[5m';                     // blink
+                    if (option[x] == 2) op = '\u001b[4m';                   // underline
+                }
+                let buf = "\x1b[3"
+                switch (color) {
+                    case 'black': buf += 0; break;
+                    case 'red': buf += 1; break;
+                    case 'green': buf += 2; break;
+                    case 'yellow': buf += 3; break;
+                    case 'blue': buf += 4; break;
+                    case 'purple': buf += 5; break;
+                    case 'cyan': buf += 6; break;
+                    case 'white': buf += 7; break;
+                }
+                if (input === true) return buf + bold;     // begin color without end
+                return op + buf + bold + input + '\x1b[37;m';
+            },
+            bColor: function (color, input, bright) {
+                if (input == undefined) input = '';
+                let c;
+                let start;
+                if (bright === 0) start = 10;
+                else start = 4
+                if (color === false) return '\x1b[40m';         // end color
+                if (color == 'black') c = 0;
+                if (color == 'red') c = 1;
+                if (color == 'green') c = 2;
+                if (color == 'yellow') c = 3;
+                if (color == 'blue') c = 4;
+                if (color == 'purple') c = 5;
+                if (color == 'cyan') c = 6;
+                if (color == 'white') c = 7;
+                if (input === true) return '\x1b[4' + c + op;   // begin color without end
+                if (input === false) return '\x1b[40m';         // end color
+                return '\x1b[' + start + c + "m" + input + '\x1b[40;m';;
+            },
+            fColor: function (color) {
+                return a.pos(1, 3) + a.bColor(color, a.sBox(120, 32));
+            },
+            eBox: function (width, height, type, color, bold) {
+                let boxType = [
+                    // TL  TOP  TR   RS   BR  BOT   BL   LS
+                    ['┌', '─', '┐', '│', '┘', '─', '└', '│'],   // 0 plain box, single line
+                    ['╒', '═', '╕', '│', '╛', '═', '╘', '│'],   // 1 plain box, double lines top&bottom
+                    ['╒', '═', '╕', '║', '╛', '═', '╘', '│'],   // 2 Left box, double lines top&bottom
+                    ['╔', '═', '╗', '║', '╝', '═', '╚', '║'],   // 3 plain box, double lines
+                    ['╔', '═', '╗', '║', '╡', '═', '╞', '║'],   // 4 top half - double lines top - sigle bottom
+                    ['█', '▀', '█', '█', '█', '▄', '█', '█'],   // 5
+                    ['░', '░', '░', '░', '░', '░', '░', '░'],   // 6
+                    ['▒', '▒', '▒', '▒', '▒', '▒', '▒', '▒'],   // 7
+                    ['▓', '▓', '▓', '▓', '▓', '▓', '▓', '▓'],   // 8
+                    ['█', '█', '█', '█', '█', '█', '█', '█'],   // 9
+                    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ']    // 10
+
+                ];
+                let buf = '';
+                buf += '\x1b[s';
+                buf += boxType[type][0];
+                buf += boxType[type][1].repeat(width - 2);
+                buf += boxType[type][2];
+                buf += '\x1b[B\b';
+                buf += (boxType[type][3] + '\x1b[B\b').repeat(height);
+                buf += '\x1b[u\x1b[B';
+                buf += (boxType[type][7] + '\x1b[B\b').repeat(height);
+                buf += boxType[type][6];
+                buf += boxType[type][5].repeat(width - 2);
+                buf += boxType[type][4];
+                if (color == undefined) return buf;
+                else return a.color(color, buf, bold)
+            },
+            eBoxFull: function (width, height, type) {
+                let boxType = [
+                    // TL  TOP  TR   RS   BR   BL   LS
+                    ['┌', '─', '┐', '│', '┘', '└', '│'],  // 0 plain box, single line
+                    ['╒', '═', '╕', '│', '╛', '╘', '│'],  // 1 plain box, double lines top&bottom
+                    ['╒', '═', '╕', '║', '╛', '╘', '│'],  // 2 Left box, double lines top&bottom
+                    ['╔', '═', '╗', '║', '╝', '╚', '║'],  // 3 plain box, double lines
+                    ['╔', '═', '╗', '║', '╡', '╞', '║'],  // 4 top half - double lines top - sigle bottom
+                ];
+                let buf = '';
+                buf += '\x1b[s';
+                buf += boxType[type][0];
+                buf += boxType[type][1].repeat(width - 2);
+                buf += boxType[type][2];
+                buf += '\x1b[B';
+                buf += (boxType[type][3] + '\x1b[B').repeat(height);
+                buf += '\x1b[u\x1b[B';
+                buf += (boxType[type][6] + '\x1b[B\b').repeat(height);
+                buf += boxType[type][5];
+                buf += boxType[type][1].repeat(width - 2);
+                buf += boxType[type][4];
+                return buf;
+            },
+            sBox: function (width, height, type, color, bold) {
+                let buf = '';
+                if (type == undefined) type = 4;
+                let boxColor = ['░', '▒', '▓', '█', ' ',];
+                for (let y = 0; y < (height); y++) {
+                    buf += '\x1b[s'
+                    for (let x = 0; x < (width); x++) buf += boxColor[type];
+                    buf += '\x1b[u\x1b[B';
+                }
+                if (color == undefined) return buf;
+                else if (type == 4) return a.bColor(color, buf, bold);
+                else return a.color(color, buf, bold);
+            },
+            gBox: function (column, row, width, height, vertical, scaleHigh, cur, high) {
+                let buf = '';
+                let count = 0;
+                let step;
+                let calcBase = [
+                    [9.5, 8.5, 7.5, 6.5, 5.5, 4.5, 3.5, 2.5, 1.5, 0.5],
+                    [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5]
+                ];
+                let colors =
+                    [[2, 2, 2, 2, 3, 3, 3, 1, 1, 1], [1, 1, 1, 3, 3, 3, 2, 2, 2, 2]];
+                let calc1 = Number(cur) / Number(high);
+                let calc2 = (calc1 * 10.0);
+                save(true);
+
+                if (scaleHigh == true) {
+                    for (let x = 0; x < 10; x++) {
+                        if (cur >= calcBase[1][x]) count++;
+                    }
+                } else {
+                    for (let x = 0; x < 10; x++) {
+                        if (cur <= calcBase[0][x]) count++;
+                    }
+                }
+
+
+                if (vertical == true)
+                    step = height;
+                else
+                    step = 0;
+                buf += a.pos(column, row);
+                if (vertical == true) {
+                    for (let x = step; x > 0; x--) {
+                        if (scaleHigh == true) {
+                            if ((count - 1) > 5) {
+                                if (step < count + 1)
+                                    buf += '\x1b[42;32m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                            if ((count - 1) < 6 && count > 2) {
+                                if (step < (count + 1))
+                                    buf += '\x1b[43;33m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                            if ((count - 1) < 3) {
+                                if (step < count + 1)
+                                    buf += '\x1b[41;31m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                        } else {
+                            if ((count - 1) > 5) {
+                                if (step < count + 1)
+                                    buf += '\x1b[41;31m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                            if ((count - 1) < 6 && count > 2) {
+                                if (step < (count + 1))
+                                    buf += '\x1b[43;33m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                            if ((count - 1) < 3) {
+                                if (step < count + 1)
+                                    buf += '\x1b[42;32m';
+                                else
+                                    buf += '\x1b[40;30m';
+                            }
+                        }
+                        buf += '\x1b[s';
+                        for (let y = 0; y < (width); y++) {
+                            buf += '█';
+                        }
+                        buf += '\x1b[u\x1b[B';
+                    }
+                }
+                session.socket.write(buf + '\x1b[37m');
+            },
+            save: function (save) {
+                let buf = "";
+                if (save)
+                    buf = '\x1b[s';
+                else
+                    buf = '\x1b[u';
+                return buf;
+            },
+            clr: function () {
+                return '\x1b[2J\x1b[3J\x1b[H';
+            },
+            clrLn: function () {
+                return '\x1b[2K';
+            },
+            echoOn: function () { //for telnet only
+                let buf = "";
+                buf += "\x1b[?25h";
+                buf += Buffer.from([0xFF, 0xFC, 0x01, 0xFF, 0xFC, 0x03]);
+                return buf;
+            },
+            mouse: function (enable) {
+                if (enable == false) return "\x1b[?1000;1006;1015l";
+                else return "\x1b[?1000;1006;1015h";
+            },
+            cursor: function (enable) {
+                if (enable == false) return "\x1b[?25l";
+                else return "\x1b[?25h";
+            },
+            but: function (name, background, foreground, col, length, row, gap, bold) {
+                let buf = "", fbold = undefined;
+                if (!length) length = name.length;
+                if (!gap) gap = 0;
+                if (foreground == "black" && background == "black") { bold = 0; }
+                if (foreground == "blue" && background == "black") { bold = 0; fbold = 0; }
+                if (foreground == "green" && background == "black") { bold = 0; fbold = 0; }
+                if (foreground == "yellow" && background == "black") { bold = 0; }
+                if (foreground == "purple" && background == "black") { bold = 0; }
+                buf += a.pos(col, row) + a.sBox(length, 1, 4, background, bold);
+                buf += a.pos((col + Math.floor((length - name.length) / 2)), gap);
+                buf += a.bColor(background, a.color(foreground, name, fbold), bold);
+                return buf;
+            },
+        };
+        log = function (message, mod, level, thread) {      // add a new case with the name of your automation function
+            let
+                buf = time.stamp, cbuf = buf + "\x1b[3", lbuf = "", mbuf = "", ubuf = buf + "\x1b[3";
+            if (level == undefined) level = 1;
+            switch (level) {
+                case 0: ubuf += "6"; cbuf += "6"; lbuf += "|--debug--|"; break;
+                case 1: ubuf += "4"; cbuf += "7"; lbuf += "|  Event  |"; break;
+                case 2: ubuf += "3"; cbuf += "3"; lbuf += "|*Warning*|"; break;
+                case 3: ubuf += "1"; cbuf += "1"; lbuf += "|!!ERROR!!|"; break;
+                case 4: ubuf += "5"; cbuf += "5"; lbuf += "|~~Notif~~|"; break;
+                default: ubuf += "4"; cbuf += "4"; lbuf += "|  Event  |"; break;
+            }
+            buf += lbuf;
+            // cbuf += "m" + lbuf + "\x1b[37;m";
+            cbuf += ";1m" + lbuf + "\x1b[37;m";
+            ubuf += ";1m" + lbuf + "\x1b[37;m";  // different colors for UDP client logs (bold)
+            switch (mod) {      // add a new case with the name of your automation function, starting at case 3
+                case 0: mbuf += "  System| "; break;
+                case 1: mbuf += "nfTables| "; break;
+                case 2: mbuf += " Gateway| "; break;
+                case 3: mbuf += " WebServ| "; break;
+                case 4: mbuf += "  VPN_WG| "; break;
+                case 5: mbuf += a.color("cyan", " Central", 0) + "| "; break;
+                case 6: mbuf += "Vouchers| "; break;
+                case 7: mbuf += "   Guest| "; break;
+                case 8: mbuf += "     ARP| "; break;
+                case 9: mbuf += "  Portal| "; break;
+                case 10: mbuf += "Telegram| "; break;
+                case 20: mbuf += a.color("purple", "WSocket| ",); break;
+                default:
+                    if (mod != undefined) ubuf += mod + " | ";  // udp client can specify its own mod
+                    else mbuf += " System| ";  // setting no mod still generates a regular event
+                    break;
+            }
+            buf += mbuf + message;
+            cbuf += mbuf + message;
+            ubuf += mbuf + message;
+            if (logs.sys[logs.step] == undefined) logs.sys.push(buf);
+            else logs.sys[logs.step] = buf;
+            if (logs.step < 500) logs.step++; else logs.step = 0;
+            if (cfg && cfg.tele != undefined && state.boot == true) {
+                if (level >= cfg.tele.logLevel || level == 0 && cfg.tele.logDebug == true)
+                    cfg.tele.client.forEach(element => { bot.sendMessage(element, buf); });
+            }
+
+            console.log(cbuf);
+            return buf;
+        };
         spawn = function (command, args, onData, onClose, object) {
             let data = "";
             let process = cp.spawn(command, args, object);
@@ -2627,6 +3021,36 @@ sys = {
             });
             // process.stderr.on('data', (buf) => { console.log(buf); });
             spawnC.push(process);
+        };
+        post = function (https, server, type, typeClass, data) {
+            if (type) type = "?type=" + type;
+            else type = "";
+            if (typeClass) typeClass = "&class=" + typeClass;
+            else typeClass = "";
+            fetch(https + "://" + server + ":444/" + type + typeClass, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+                .catch(() => {/* sys.boot(6);*/ });
+        };
+        get = function (https, server, type, typeClass, callback, callbackObject, callbackError, postObject) {
+            if (type) type = "?type=" + type;
+            else type = "";
+            if (typeClass) typeClass = "&class=" + typeClass;
+            else typeClass = "";
+            log("sending data to MASTER")
+            fetch(https + "://" + server + ":444/" + type + typeClass, {
+                method: 'GET',
+                headers: postObject ? { Authorization: JSON.stringify(postObject) } : undefined
+            })
+                .then((response) => response.text())
+                .then((data) => {
+                    if (typeof callback === 'function') {
+                        callback(data, callbackObject);
+                    }
+                })
+                .catch(() => { if (typeof callbackError === 'function') { callbackError(); } })
         };
         parse = function (data, startString, endChar, len, isRegex) {
             let sort, pos = 0;
@@ -2666,7 +3090,7 @@ sys = {
                 if (!state.fileTimer[file]) state.fileTimer[file] = null;
                 clearTimeout(state.fileTimer[file]);
                 state.fileTimer[file] = setTimeout(() => {
-                    if (file != "stat_nv" && file != "guest") console.log("system    - saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
+                    if (file != "stat_nv" && file != "guest") log("saving " + file + " data to: " + path.app + "nfsense-" + file + ".tmp");
                     fs.writeFile(path.app + "nfsense-" + file + ".tmp", JSON.stringify(global[file], null, 2), 'utf-8', (e) => {
                         cp.exec("cp " + path.app + "nfsense-" + file + ".tmp " + path.app + "nfsense-" + file + ".json", () => { });
                     })
@@ -2674,11 +3098,11 @@ sys = {
             },
             read: function (file) {
                 try {
-                    console.log("system    - loading " + file + " data");
+                    log("loading " + file + " data");
                     global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
                 } catch (e) {
-                    // console.log(e)
-                    console.log("system    - file read error - " + file + " file does not exist, creating");
+                    // log(e)
+                    log("read error - " + file + " file does not exist, creating");
                     // cp.execSync("touch " + path.app + "nfsense-" + file + ".json")
                     fs.writeFileSync(path.app + "nfsense-" + file + ".json", "{ }", "utf8");
                     global[file] = JSON.parse(fs.readFileSync(path.app + "nfsense-" + file + ".json", 'utf8'));
@@ -2688,7 +3112,7 @@ sys = {
         };
         libLate = function () {
             if (cfg.service.telegram.enabled) {
-                console.log('telegram  - service started');
+                log('service started');
                 TelegramBot = require('node-telegram-bot-api');
                 bot = new TelegramBot(cfg.service.telegram.token, { polling: true });
             }
@@ -2732,20 +3156,20 @@ sys = {
             eWebAdmin = https.createServer(sslOptions, webAdmin); // Admin HTTP server (port 82)
             eWebSecure = https.createServer(sslOptions, webSecure); // HTTPS server (port 443)
             swss = new WebSocket.Server({ server: eWebAdmin });   // WSS on HTTPS (port 443)
-            eWeb.listen(81, () => console.log('webserver - Redirect server running on port 80'));
-            eWebPublic.listen(83, () => console.log('webserver - public server running on port 83'));
-            eWebAdmin.listen(82, () => console.log('webserver - HTTP admin web server running on port 82'));
-            eWebSecure.listen(443, () => console.log('webserver - HTTPS admin web server running on port 443'));
+            eWeb.listen(81, () => log('Redirect server running on port 80'));
+            eWebPublic.listen(83, () => log('public server running on port 83'));
+            eWebAdmin.listen(82, () => log('HTTP admin web server running on port 82'));
+            eWebSecure.listen(444, () => log('HTTPS admin web server running on port 443'));
         };
         send = function (type, typeClass, obj) {
             udp.send(JSON.stringify({ type: type, class: typeClass, obj: obj }), 31, '10.21.88.2', function (error) {
-                if (error) { console.log(error) }
+                if (error) { log(error) }
             });
-        }
+        };
         time.startTime();
     },
     checkArgs: function () {
-        console.log("system    - checking start arguments");
+        log("checking start arguments");
         if (process.argv[2] == "-i") {
             let service = [
                 "[Unit]",
@@ -2755,7 +3179,8 @@ sys = {
                 "[Install]",
                 "WantedBy=multi-user.target\n",
                 "[Service]",
-                "ExecStart=nodemon " + path.app + "nfsense.js -w " + path.app + "nfsense.js -w " + path.app + "nfsense-config.json --exitcrash",
+                "ExecStartPre=/bin/sleep 10",
+                "ExecStart=nodemon " + path.app + "nfsense.js -w " + path.app + "nfsense.js -w " + path.app + "nfsense-cfg.json --exitcrash",
                 "Type=simple",
                 "Restart=always",
                 "RestartSec=10s",
@@ -2831,5 +3256,7 @@ sys = {
         }
     },
 }
+cfg = {};
+logs = { sys: [], step: 0, }
 sys.boot();
 
